@@ -316,6 +316,8 @@ func NewDaemon(ctx context.Context, cancel context.CancelFunc, epMgr *endpointma
 		return nil, nil, fmt.Errorf("unable to configure API rate limiting: %w", err)
 	}
 
+	probeManagedNeighborSupport()
+
 	// Do the partial kube-proxy replacement initialization before creating BPF
 	// maps. Otherwise, some maps might not be created (e.g. session affinity).
 	// finishKubeProxyReplacementInit(), which is called later after the device
