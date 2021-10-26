@@ -2,10 +2,11 @@ package netlink
 
 import (
 	"fmt"
-	"github.com/vishvananda/netlink/nl"
-	"golang.org/x/sys/unix"
 	"net"
 	"syscall"
+
+	"github.com/vishvananda/netlink/nl"
+	"golang.org/x/sys/unix"
 )
 
 // DevlinkDevEswitchAttr represents device's eswitch attributes
@@ -132,9 +133,9 @@ func (d *DevlinkDevice) parseAttributes(attrs []syscall.NetlinkRouteAttr) error 
 	for _, a := range attrs {
 		switch a.Attr.Type {
 		case nl.DEVLINK_ATTR_BUS_NAME:
-			d.BusName = string(a.Value)
+			d.BusName = string(a.Value[:len(a.Value)-1])
 		case nl.DEVLINK_ATTR_DEV_NAME:
-			d.DeviceName = string(a.Value)
+			d.DeviceName = string(a.Value[:len(a.Value)-1])
 		case nl.DEVLINK_ATTR_ESWITCH_MODE:
 			d.Attrs.Eswitch.Mode = parseEswitchMode(native.Uint16(a.Value))
 		case nl.DEVLINK_ATTR_ESWITCH_INLINE_MODE:
@@ -163,12 +164,12 @@ func (h *Handle) getEswitchAttrs(family *GenlFamily, dev *DevlinkDevice) {
 	req := h.newNetlinkRequest(int(family.ID), unix.NLM_F_REQUEST|unix.NLM_F_ACK)
 	req.AddData(msg)
 
-	b := make([]byte, len(dev.BusName))
+	b := make([]byte, len(dev.BusName)+1)
 	copy(b, dev.BusName)
 	data := nl.NewRtAttr(nl.DEVLINK_ATTR_BUS_NAME, b)
 	req.AddData(data)
 
-	b = make([]byte, len(dev.DeviceName))
+	b = make([]byte, len(dev.DeviceName)+1)
 	copy(b, dev.DeviceName)
 	data = nl.NewRtAttr(nl.DEVLINK_ATTR_DEV_NAME, b)
 	req.AddData(data)
@@ -312,19 +313,19 @@ func (port *DevlinkPort) parseAttributes(attrs []syscall.NetlinkRouteAttr) error
 	for _, a := range attrs {
 		switch a.Attr.Type {
 		case nl.DEVLINK_ATTR_BUS_NAME:
-			port.BusName = string(a.Value)
+			port.BusName = string(a.Value[:len(a.Value)-1])
 		case nl.DEVLINK_ATTR_DEV_NAME:
-			port.DeviceName = string(a.Value)
+			port.DeviceName = string(a.Value[:len(a.Value)-1])
 		case nl.DEVLINK_ATTR_PORT_INDEX:
 			port.PortIndex = native.Uint32(a.Value)
 		case nl.DEVLINK_ATTR_PORT_TYPE:
 			port.PortType = native.Uint16(a.Value)
 		case nl.DEVLINK_ATTR_PORT_NETDEV_NAME:
-			port.NetdeviceName = string(a.Value)
+			port.NetdeviceName = string(a.Value[:len(a.Value)-1])
 		case nl.DEVLINK_ATTR_PORT_NETDEV_IFINDEX:
 			port.NetdevIfIndex = native.Uint32(a.Value)
 		case nl.DEVLINK_ATTR_PORT_IBDEV_NAME:
-			port.RdmaDeviceName = string(a.Value)
+			port.RdmaDeviceName = string(a.Value[:len(a.Value)-1])
 		case nl.DEVLINK_ATTR_PORT_FLAVOUR:
 			port.PortFlavour = native.Uint16(a.Value)
 		case nl.DEVLINK_ATTR_PORT_FUNCTION:
@@ -492,11 +493,11 @@ func (h *Handle) DevlinkPortFnSet(Bus string, Device string, PortIndex uint32, F
 
 	fnAttr := nl.NewRtAttr(nl.DEVLINK_ATTR_PORT_FUNCTION|unix.NLA_F_NESTED, nil)
 
-	if FnAttrs.HwAddrValid == true {
+	if FnAttrs.HwAddrValid {
 		fnAttr.AddRtAttr(nl.DEVLINK_PORT_FUNCTION_ATTR_HW_ADDR, []byte(FnAttrs.FnAttrs.HwAddr))
 	}
 
-	if FnAttrs.StateValid == true {
+	if FnAttrs.StateValid {
 		fnAttr.AddRtAttr(nl.DEVLINK_PORT_FN_ATTR_STATE, nl.Uint8Attr(FnAttrs.FnAttrs.State))
 	}
 	req.AddData(fnAttr)

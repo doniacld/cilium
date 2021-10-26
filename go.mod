@@ -225,6 +225,9 @@ replace (
 	github.com/miekg/dns => github.com/cilium/dns v1.1.4-0.20190417235132-8e25ec9a0ff3
 	github.com/optiopay/kafka => github.com/cilium/kafka v0.0.0-20180809090225-01ce283b732b
 
+	// Using cilium/netlink until neighboring patches merged upstream
+	github.com/vishvananda/netlink => github.com/cilium/netlink v1.0.1-0.20211029134139-e692b68616ee
+
 	go.universe.tf/metallb => github.com/cilium/metallb v0.1.1-0.20210831235406-48667b93284d
 
 	// Using private fork of controller-tools. See commit msg for more context
