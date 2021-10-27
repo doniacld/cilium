@@ -1070,7 +1070,7 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	c.Assert(err, check.IsNil)
 	found := false
 	for _, n := range neighs {
-		if n.IP.Equal(ip1) && n.State == netlink.NUD_PERMANENT {
+		if n.IP.Equal(ip1) && (n.State&netlink.NUD_REACHABLE) > 0 {
 			found = true
 			break
 		}
@@ -1100,7 +1100,7 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	c.Assert(err, check.IsNil)
 	found = false
 	for _, n := range neighs {
-		if n.IP.Equal(ip1) && n.State == netlink.NUD_PERMANENT {
+		if n.IP.Equal(ip1) && (n.State&netlink.NUD_REACHABLE) > 0 {
 			found = true
 			updatedHwAddrFromArpEntry = n.HardwareAddr
 			break
@@ -1119,7 +1119,7 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	c.Assert(err, check.IsNil)
 	found = false
 	for _, n := range neighs {
-		if n.IP.Equal(ip1) && n.State == netlink.NUD_PERMANENT {
+		if n.IP.Equal(ip1) && (n.State&netlink.NUD_REACHABLE) > 0 {
 			found = true
 			break
 		}
@@ -1145,14 +1145,6 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 		linuxNodeHandler.neighLock.Lock()
 		defer linuxNodeHandler.neighLock.Unlock()
 		return linuxNodeHandler.neighNextHopRefCount[nextHopStr]
-	}
-	neighHwAddr := func(nextHopStr string) string {
-		linuxNodeHandler.neighLock.Lock()
-		defer linuxNodeHandler.neighLock.Unlock()
-		if neigh, found := linuxNodeHandler.neighByNextHop[nextHopStr]; found {
-			return neigh.HardwareAddr.String()
-		}
-		return ""
 	}
 
 	done := make(chan struct{})
@@ -1191,9 +1183,8 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 			c.Assert(err, check.IsNil)
 			found = false
 			for _, n := range neighs {
-				if n.IP.Equal(ip1) && n.State == netlink.NUD_PERMANENT &&
+				if n.IP.Equal(ip1) && (n.State&netlink.NUD_REACHABLE) > 0 &&
 					n.HardwareAddr.String() == mac.String() &&
-					neighHwAddr(ip1.String()) == mac.String() &&
 					neighRefCount(ip1.String()) == 1 {
 					found = true
 					return true
@@ -1374,7 +1365,7 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	c.Assert(err, check.IsNil)
 	found = false
 	for _, n := range neighs {
-		if n.IP.Equal(nextHop) && n.State == netlink.NUD_PERMANENT {
+		if n.IP.Equal(nextHop) && (n.State&netlink.NUD_REACHABLE) > 0 {
 			found = true
 		} else if n.IP.Equal(node2IP) || n.IP.Equal(node3IP) {
 			c.ExpectFailure("node{2,3} should not be in the same L2")
@@ -1388,7 +1379,7 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	neighs, err = netlink.NeighList(veth0.Attrs().Index, netlink.FAMILY_V4)
 	found = false
 	for _, n := range neighs {
-		if n.IP.Equal(nextHop) && n.State == netlink.NUD_PERMANENT {
+		if n.IP.Equal(nextHop) && (n.State&netlink.NUD_REACHABLE) > 0 {
 			found = true
 			break
 		}
@@ -1403,7 +1394,7 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	neighs, err = netlink.NeighList(veth0.Attrs().Index, netlink.FAMILY_V4)
 	c.Assert(err, check.IsNil)
 	for _, n := range neighs {
-		if n.IP.Equal(nextHop) && n.State == netlink.NUD_PERMANENT {
+		if n.IP.Equal(nextHop) && (n.State&netlink.NUD_REACHABLE) > 0 {
 			found = true
 			break
 		}
@@ -1420,7 +1411,7 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	c.Assert(err, check.IsNil)
 	found = false
 	for _, n := range neighs {
-		if n.IP.Equal(nextHop) && n.State == netlink.NUD_PERMANENT {
+		if n.IP.Equal(nextHop) && (n.State&netlink.NUD_REACHABLE) > 0 {
 			found = true
 		} else if n.IP.Equal(node2IP) || n.IP.Equal(node3IP) {
 			c.ExpectFailure("node{2,3} should not be in the same L2")
@@ -1435,7 +1426,7 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	c.Assert(err, check.IsNil)
 	found = false
 	for _, n := range neighs {
-		if n.IP.Equal(nextHop) && n.State == netlink.NUD_PERMANENT {
+		if n.IP.Equal(nextHop) && (n.State&netlink.NUD_REACHABLE) > 0 {
 			found = true
 		} else if n.IP.Equal(node2IP) || n.IP.Equal(node3IP) {
 			c.ExpectFailure("node{2,3} should not be in the same L2")
