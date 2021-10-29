@@ -349,10 +349,6 @@ func (d *Daemon) getBPFMapStatus() *models.BPFMapStatus {
 				Size: int64(option.Config.NATMapEntriesGlobal),
 			},
 			{
-				Name: "Neighbor table",
-				Size: int64(option.Config.NeighMapEntriesGlobal),
-			},
-			{
 				Name: "Global policy",
 				Size: int64(option.Config.PolicyMapEntries),
 			},

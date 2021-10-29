@@ -60,7 +60,6 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
 #ifdef ENABLE_NODEPORT
 #define SNAT_MAPPING_IPV4 test_cilium_snat_v4_external
 #define SNAT_MAPPING_IPV4_SIZE 524288
-#define NODEPORT_NEIGH4_SIZE 524288
 #endif /* ENABLE_NODEPORT */
 #define CAPTURE4_RULES cilium_capture4_rules
 #define CAPTURE4_SIZE 16384
@@ -70,7 +69,6 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
 #ifdef ENABLE_NODEPORT
 #define SNAT_MAPPING_IPV6 test_cilium_snat_v6_external
 #define SNAT_MAPPING_IPV6_SIZE 524288
-#define NODEPORT_NEIGH6_SIZE 524288
 #endif /* ENABLE_NODEPORT */
 #define CAPTURE6_RULES cilium_capture6_rules
 #define CAPTURE6_SIZE 16384
@@ -139,15 +137,6 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
 #define LB4_HEALTH_MAP test_cilium_lb4_health
 #define LB6_HEALTH_MAP test_cilium_lb6_health
 #endif /* ENABLE_NODEPORT || ENABLE_HOST_FIREWALL */
-
-#ifdef ENABLE_NODEPORT
-#ifdef ENABLE_IPV4
-#define NODEPORT_NEIGH4 test_cilium_neigh4
-#endif
-#ifdef ENABLE_IPV6
-#define NODEPORT_NEIGH6 test_cilium_neigh6
-#endif
-#endif
 
 #ifdef ENABLE_NODEPORT
 # define DIRECT_ROUTING_DEV_IFINDEX 0

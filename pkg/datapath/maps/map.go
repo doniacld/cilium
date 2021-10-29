@@ -126,6 +126,12 @@ func (ms *MapSweeper) CollectStaleMapGarbage() {
 func (ms *MapSweeper) RemoveDisabledMaps() {
 	maps := []string{}
 
+	// Deprecated maps that should be unconditionally removed.
+	maps = append(maps, []string{
+		"cilium_nodeport_neigh4",
+		"cilium_nodeport_neigh6",
+	}...)
+
 	if !option.Config.EnableIPv6 {
 		maps = append(maps, []string{
 			"cilium_ct6_global",

@@ -36,7 +36,7 @@ Egress Policy            endpoint         16k             Max 16k endpoints acro
 For some BPF maps, the upper capacity limit can be overridden using command
 line options for ``cilium-agent``. A given capacity can be set using
 ``--bpf-ct-global-tcp-max``, ``--bpf-ct-global-any-max``,
-``--bpf-nat-global-max``, ``--bpf-neigh-global-max``, ``--bpf-policy-map-max``,
+``--bpf-nat-global-max``, ``--bpf-policy-map-max``,
 ``--bpf-fragments-map-max`` and ``--bpf-lb-map-max``.
 
 .. Note::
@@ -53,9 +53,8 @@ of the total system memory. For example, a given ratio of 0.0025 leads to 0.25%
 of the total system memory to be used for these maps.
 
 This flag affects the following BPF maps that consume most memory in the system:
-``cilium_ct_{4,6}_global``, ``cilium_ct_{4,6}_any``,
-``cilium_nodeport_neigh{4,6}``, ``cilium_snat_v{4,6}_external`` and
-``cilium_lb{4,6}_reverse_sk``.
+``cilium_ct_{4,6}_global``, ``cilium_ct_{4,6}_any``, ``cilium_snat_v{4,6}_external``
+and ``cilium_lb{4,6}_reverse_sk``.
 
 ``kube-proxy`` sets as the maximum number entries in the linux's connection
 tracking table based on the number of cores the machine has. ``kube-proxy`` has

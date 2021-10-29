@@ -576,7 +576,8 @@ const (
 	// NATMapEntriesGlobalName configures max entries for BPF NAT table
 	NATMapEntriesGlobalName = "bpf-nat-global-max"
 
-	// NeighMapEntriesGlobalName configures max entries for BPF neighbor table
+	// NeighMapEntriesGlobalName configures max entries for BPF neighbor
+	// table (DEPRECATED).
 	NeighMapEntriesGlobalName = "bpf-neigh-global-max"
 
 	// PolicyMapEntriesName configures max entries for BPF policymap.
@@ -953,7 +954,8 @@ const (
 	// Otherwise, it will use the old scheme.
 	EgressMultiHomeIPRuleCompat = "egress-multi-home-ip-rule-compat"
 
-	// EnableBPFBypassFIBLookup instructs Cilium to enable the FIB lookup bypass optimization for nodeport reverse NAT handling.
+	// EnableBPFBypassFIBLookup instructs Cilium to enable the FIB lookup bypass
+	// optimization for nodeport reverse NAT handling (DEPRECATED).
 	EnableBPFBypassFIBLookup = "bpf-lb-bypass-fib-lookup"
 
 	// EnableCustomCallsName is the name of the option to enable tail calls
@@ -1318,10 +1320,6 @@ type DaemonConfig struct {
 	// NATMapEntriesGlobal is the maximum number of NAT mappings allowed
 	// in the BPF NAT table
 	NATMapEntriesGlobal int
-
-	// NeighMapEntriesGlobal is the maximum number of neighbor mappings
-	// allowed in the BPF neigh table
-	NeighMapEntriesGlobal int
 
 	// PolicyMapEntries is the maximum number of peer identities that an
 	// endpoint may allow traffic to exchange traffic with.
@@ -1729,9 +1727,6 @@ type DaemonConfig struct {
 	// via XDP ("none", "generic" or "native")
 	NodePortAcceleration string
 
-	// NodePortHairpin indicates whether the setup is a one-legged LB
-	NodePortHairpin bool
-
 	// NodePortBindProtection rejects bind requests to NodePort service ports
 	NodePortBindProtection bool
 
@@ -1978,9 +1973,6 @@ type DaemonConfig struct {
 	// store rules and routes under ENI and Azure IPAM modes, if false.
 	// Otherwise, it will use the old scheme.
 	EgressMultiHomeIPRuleCompat bool
-
-	// EnableBPFBypassFIBLookup instructs Cilium to enable the FIB lookup bypass optimization for nodeport reverse NAT handling.
-	EnableBPFBypassFIBLookup bool
 
 	// InstallNoConntrackIptRules instructs Cilium to install Iptables rules to skip netfilter connection tracking on all pod traffic.
 	InstallNoConntrackIptRules bool
@@ -2588,7 +2580,6 @@ func (c *DaemonConfig) Populate() {
 	c.LoadBalancerDSRL4Xlate = viper.GetString(LoadBalancerDSRL4Xlate)
 	c.LoadBalancerRSSv4CIDR = viper.GetString(LoadBalancerRSSv4CIDR)
 	c.LoadBalancerRSSv6CIDR = viper.GetString(LoadBalancerRSSv6CIDR)
-	c.EnableBPFBypassFIBLookup = viper.GetBool(EnableBPFBypassFIBLookup)
 	c.InstallNoConntrackIptRules = viper.GetBool(InstallNoConntrackIptRules)
 	c.EnableCustomCalls = viper.GetBool(EnableCustomCallsName)
 	c.BGPAnnounceLBIP = viper.GetBool(BGPAnnounceLBIP)
@@ -3026,7 +3017,6 @@ func (c *DaemonConfig) calculateBPFMapSizes() error {
 	c.CTMapEntriesGlobalTCP = viper.GetInt(CTMapEntriesGlobalTCPName)
 	c.CTMapEntriesGlobalAny = viper.GetInt(CTMapEntriesGlobalAnyName)
 	c.NATMapEntriesGlobal = viper.GetInt(NATMapEntriesGlobalName)
-	c.NeighMapEntriesGlobal = viper.GetInt(NeighMapEntriesGlobalName)
 	c.PolicyMapEntries = viper.GetInt(PolicyMapEntriesName)
 	c.SockRevNatEntries = viper.GetInt(SockRevNatEntriesName)
 	c.LBMapEntries = viper.GetInt(LBMapEntriesName)
@@ -3035,7 +3025,6 @@ func (c *DaemonConfig) calculateBPFMapSizes() error {
 	// populated by the daemon (or any other caller).
 	if c.SizeofCTElement == 0 ||
 		c.SizeofNATElement == 0 ||
-		c.SizeofNeighElement == 0 ||
 		c.SizeofSockRevElement == 0 {
 		return nil
 	}
@@ -3064,12 +3053,10 @@ func (c *DaemonConfig) calculateBPFMapSizes() error {
 func (c *DaemonConfig) SetMapElementSizes(
 	sizeofCTElement,
 	sizeofNATElement,
-	sizeofNeighElement,
 	sizeofSockRevElement int) {
 
 	c.SizeofCTElement = sizeofCTElement
 	c.SizeofNATElement = sizeofNATElement
-	c.SizeofNeighElement = sizeofNeighElement
 	c.SizeofSockRevElement = sizeofSockRevElement
 }
 
@@ -3143,15 +3130,6 @@ func (c *DaemonConfig) calculateDynamicBPFMapSizes(totalMemory uint64, dynamicSi
 		}
 	} else {
 		log.Debugf("option %s set by user to %v", NATMapEntriesGlobalName, c.NATMapEntriesGlobal)
-	}
-	if !viper.IsSet(NeighMapEntriesGlobalName) {
-		// By default we auto-size it to the same value as the NAT map since we
-		// need to keep at least as many neigh entries.
-		c.NeighMapEntriesGlobal = c.NATMapEntriesGlobal
-		log.Infof("option %s set by dynamic sizing to %v",
-			NeighMapEntriesGlobalName, c.NeighMapEntriesGlobal)
-	} else {
-		log.Debugf("option %s set by user to %v", NeighMapEntriesGlobalName, c.NeighMapEntriesGlobal)
 	}
 	if !viper.IsSet(SockRevNatEntriesName) {
 		c.SockRevNatEntries =
