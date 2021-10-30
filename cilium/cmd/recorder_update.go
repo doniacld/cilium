@@ -34,7 +34,7 @@ func init() {
 	recorderUpdateCmd.Flags().StringSliceVarP(&filters, "filters", "", []string{}, "List of filters ('<srcCIDR> <srcPort> <dstCIDR> <dstPort> <proto>')")
 }
 
-func updateRecorder(cmd *cobra.Command, args []string) {
+func updateRecorder(cmd *cobra.Command, _ []string) {
 	var spec *models.RecorderSpec
 
 	id := int64(idRec)

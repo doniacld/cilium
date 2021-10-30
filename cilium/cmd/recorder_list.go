@@ -31,7 +31,7 @@ func init() {
 	command.AddJSONOutput(recorderListCmd)
 }
 
-func listMasks(cmd *cobra.Command, args []string) {
+func listMasks(_ *cobra.Command, _ []string) {
 	list, err := client.GetRecorderMasks()
 	if err != nil {
 		Fatalf("Cannot get recorder mask list: %s", err)
@@ -90,7 +90,7 @@ func printRecorderMaskList(w *tabwriter.Writer, maskList []*models.RecorderMask)
 	w.Flush()
 }
 
-func listRecorders(cmd *cobra.Command, args []string) {
+func listRecorders(_ *cobra.Command, _ []string) {
 	list, err := client.GetRecorder()
 	if err != nil {
 		Fatalf("Cannot get recorder list: %s", err)

@@ -82,14 +82,14 @@ func preflightPoller() {
 	lookupTime := time.Now()
 
 	// Get data from the local cilium-agent
-	DNSData, err := getDNSMappings()
+	dnsData, err := getDNSMappings()
 	if err != nil {
 		Fatalf("Cannot extract DNS data from local cilium-agent: %s", err)
 	}
 
 	// Build a cache from this data to be serialized
 	cache := fqdn.NewDNSCache(0)
-	for name, IPs := range DNSData {
+	for name, IPs := range dnsData {
 		cache.Update(lookupTime, name, IPs, toFQDNsPreCacheTTL)
 	}
 
@@ -118,7 +118,7 @@ func preflightPoller() {
 // matchName. In cases where different sets of matchNames are used, each with a
 // different combination of names, the IPs set per name will reflects IPs that
 // actuall belong to other names also seen in the toFQDNs section of that rule.
-func getDNSMappings() (DNSData map[string][]net.IP, err error) {
+func getDNSMappings() (dnsData map[string][]net.IP, err error) {
 	policy, err := client.PolicyGet(nil)
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func getDNSMappings() (DNSData map[string][]net.IP, err error) {
 	// inserted into that rule as IPs for that DNS name (this may be shared by many
 	// DNS names). We ensure that we only read /32 CIDRs, since we only ever insert
 	// those.
-	DNSData = make(map[string][]net.IP)
+	dnsData = make(map[string][]net.IP)
 	for _, rule := range rules {
 		for _, egressRule := range rule.Egress {
 			for _, ToFQDN := range egressRule.ToFQDNs {
@@ -148,11 +148,11 @@ func getDNSMappings() (DNSData map[string][]net.IP, err error) {
 						return nil, err
 					}
 					name := matchpattern.Sanitize(ToFQDN.MatchName)
-					DNSData[name] = append(DNSData[name], ip)
+					dnsData[name] = append(dnsData[name], ip)
 				}
 			}
 		}
 	}
 
-	return DNSData, nil
+	return dnsData, nil
 }

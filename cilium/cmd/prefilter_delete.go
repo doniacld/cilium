@@ -26,7 +26,7 @@ func init() {
 	preFilterDeleteCmd.Flags().StringSliceVarP(&cidrs, "cidr", "", []string{}, "List of CIDR prefixes to delete")
 }
 
-func deleteFilters(cmd *cobra.Command, args []string) {
+func deleteFilters(_ *cobra.Command, _ []string) {
 	spec := &models.PrefilterSpec{
 		Revision: int64(revision),
 		Deny:     cidrs,

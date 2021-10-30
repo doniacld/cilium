@@ -79,7 +79,7 @@ func boolToInt(set bool) int {
 	return 0
 }
 
-func updateService(cmd *cobra.Command, args []string) {
+func updateService(_ *cobra.Command, _ []string) {
 	id := int64(idU)
 	fa, faIP := parseFrontendAddress(frontend)
 

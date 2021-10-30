@@ -46,7 +46,7 @@ func listEndpointOptions() {
 	}
 }
 
-func configEndpoint(cmd *cobra.Command, args []string) {
+func configEndpoint(_ *cobra.Command, args []string) {
 	_, id, _ := endpointid.Parse(args[0])
 	cfg, err := client.EndpointConfigGet(id)
 	if err != nil {

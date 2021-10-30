@@ -31,7 +31,7 @@ func init() {
 	command.AddJSONOutput(serviceListCmd)
 }
 
-func listServices(cmd *cobra.Command, args []string) {
+func listServices(_ *cobra.Command, _ []string) {
 	list, err := client.GetServices()
 	if err != nil {
 		Fatalf("Cannot get services list: %s", err)
@@ -82,13 +82,13 @@ func printServiceList(w *tabwriter.Writer, list []*models.Service) {
 			backendAddresses = append(backendAddresses, str)
 		}
 
-		SvcOutput := ServiceOutput{
+		svcOutput := ServiceOutput{
 			ID:               svc.Status.Realized.ID,
 			ServiceType:      svc.Spec.Flags.Type,
 			FrontendAddress:  feA.String(),
 			BackendAddresses: backendAddresses,
 		}
-		svcs = append(svcs, SvcOutput)
+		svcs = append(svcs, svcOutput)
 	}
 
 	sort.Slice(svcs, func(i, j int) bool {

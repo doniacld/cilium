@@ -29,7 +29,7 @@ func init() {
 	command.AddJSONOutput(lrpListCmd)
 }
 
-func listLRPs(cmd *cobra.Command, args []string) {
+func listLRPs(_ *cobra.Command, _ []string) {
 	list, err := client.GetLRPs()
 	if err != nil {
 		Fatalf("Cannot get lrp list: %s", err)

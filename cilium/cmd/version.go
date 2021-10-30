@@ -28,7 +28,7 @@ func init() {
 	command.AddJSONOutput(versionCmd)
 }
 
-func getVersion(cmd *cobra.Command, args []string) {
+func getVersion(_ *cobra.Command, _ []string) {
 	// -o argument is set
 	if command.OutputJSON() {
 		data := struct {

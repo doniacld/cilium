@@ -27,7 +27,7 @@ func init() {
 	command.AddJSONOutput(preFilterListCmd)
 }
 
-func listFilters(cmd *cobra.Command, args []string) {
+func listFilters(_ *cobra.Command, _ []string) {
 	var str string
 	spec, err := client.GetPrefilter()
 	if err != nil {

@@ -31,7 +31,7 @@ func init() {
 	preFilterUpdateCmd.Flags().StringSliceVarP(&cidrs, "cidr", "", []string{}, "List of CIDR prefixes to block")
 }
 
-func updateFilters(cmd *cobra.Command, args []string) {
+func updateFilters(_ *cobra.Command, _ []string) {
 	spec := &models.PrefilterSpec{
 		Revision: int64(revision),
 		Deny:     cidrs,

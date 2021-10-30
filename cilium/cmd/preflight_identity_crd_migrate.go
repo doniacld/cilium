@@ -184,15 +184,15 @@ func initK8s(ctx context.Context) (crdBackend allocator.Backend, crdAllocator *a
 	k8s.Configure(k8sAPIServer, k8sKubeConfigPath, float32(k8sClientQPSLimit), k8sClientBurst)
 
 	if err := k8s.Init(k8sconfig.NewDefaultConfiguration()); err != nil {
-		log.WithError(err).Fatal("Unable to connect to Kubernetes apiserver")
+		log.WithError(err).Fatal("unable to connect to Kubernetes apiserver")
 	}
 
 	if err := k8s.WaitForNodeInformation(ctx, k8s.Client()); err != nil {
-		log.WithError(err).Fatal("Unable to connect to get node spec from apiserver")
+		log.WithError(err).Fatal("unable to connect to get node spec from apiserver")
 	}
 
 	// Update CRDs to ensure ciliumIdentity is present
-	ciliumClient.RegisterCRDs()
+	_ = ciliumClient.RegisterCRDs()
 
 	// Create a CRD Backend
 	crdBackend, err := identitybackend.NewCRDBackend(identitybackend.CRDBackendConfiguration{
@@ -202,7 +202,7 @@ func initK8s(ctx context.Context) (crdBackend allocator.Backend, crdAllocator *a
 		KeyType:  cache.GlobalIdentity{},
 	})
 	if err != nil {
-		log.WithError(err).Fatal("Cannot create CRD identity backend")
+		log.WithError(err).Fatal("cannot create CRD identity backend")
 	}
 
 	// Create a real allocator with CRD as the backend. This mimics the setup in
@@ -215,7 +215,7 @@ func initK8s(ctx context.Context) (crdBackend allocator.Backend, crdAllocator *a
 	crdAllocator, err = allocator.NewAllocator(cache.GlobalIdentity{}, crdBackend,
 		allocator.WithMax(maxID), allocator.WithMin(minID))
 	if err != nil {
-		log.WithError(err).Fatal("Unable to initialize Identity Allocator with CRD backend to allocate identities with already allocated IDs")
+		log.WithError(err).Fatal("unable to initialize Identity Allocator with CRD backend to allocate identities with already allocated IDs")
 	}
 
 	// Wait for the initial sync to complete
@@ -229,13 +229,13 @@ func initK8s(ctx context.Context) (crdBackend allocator.Backend, crdAllocator *a
 // initKVStore connects to the kvstore with a allocator.Backend, initialised to
 // find identities at the default cilium paths.
 func initKVStore(ctx context.Context) (kvstoreBackend allocator.Backend) {
-	log.Info("Setting up kvstore client")
+	log.Info("setting up kvstore client")
 	setupKvstore(ctx)
 
 	idPath := path.Join(cache.IdentitiesPath, "id")
 	kvstoreBackend, err := kvstoreallocator.NewKVStoreBackend(cache.IdentitiesPath, idPath, cache.GlobalIdentity{}, kvstore.Client())
 	if err != nil {
-		log.WithError(err).Fatal("Cannot create kvstore identity backend")
+		log.WithError(err).Fatal("cannot create kvstore identity backend")
 	}
 
 	return kvstoreBackend
@@ -265,7 +265,7 @@ func getKVStoreIdentities(ctx context.Context, kvstoreBackend allocator.Backend)
 		log.Debug("kvstore ID list complete")
 
 	case <-ctx.Done():
-		return nil, errors.New("Timeout while listing identities")
+		return nil, errors.New("timeout while listing identities")
 	}
 
 	return identities, nil

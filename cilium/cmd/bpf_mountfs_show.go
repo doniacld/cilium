@@ -29,7 +29,7 @@ func init() {
 	command.AddJSONOutput(bpfmountfsShowCmd)
 }
 
-func getbpfmountFS(cmd *cobra.Command, args []string) {
+func getbpfmountFS(_ *cobra.Command, _ []string) {
 	var mountfsStatus bool
 	mountdetails, err := mountinfo.GetMountInfo()
 	if err != nil {

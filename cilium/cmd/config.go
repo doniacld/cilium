@@ -49,7 +49,7 @@ func init() {
 	command.AddJSONOutput(configCmd)
 }
 
-func configDaemon(cmd *cobra.Command, opts []string) {
+func configDaemon(_ *cobra.Command, opts []string) {
 	dOpts := make(models.ConfigurationMap, len(opts))
 
 	resp, err := client.ConfigGet()

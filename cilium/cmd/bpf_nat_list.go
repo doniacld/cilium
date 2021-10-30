@@ -36,7 +36,7 @@ func init() {
 	command.AddJSONOutput(bpfNatListCmd)
 }
 
-func dumpNat(maps []interface{}, args ...interface{}) {
+func dumpNat(maps []interface{}, _ ...interface{}) {
 	entries := make([]nat.NatMapRecord, 0)
 
 	for _, m := range maps {

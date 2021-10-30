@@ -359,16 +359,16 @@ func updatePolicyKey(pa *PolicyUpdateArgs, add bool) {
 }
 
 // dumpConfig pretty prints boolean options
-func dumpConfig(Opts map[string]string, indented bool) {
-	opts := []string{}
-	for k := range Opts {
+func dumpConfig(confOpts map[string]string, indented bool) {
+	var opts []string
+	for k := range confOpts {
 		opts = append(opts, k)
 	}
 	sort.Strings(opts)
 
 	for _, k := range opts {
 		// XXX: Reuse the format function from *option.Library
-		value = Opts[k]
+		value = confOpts[k]
 		formatStr := "%-34s: %s\n"
 		if indented {
 			formatStr = "\t%-26s: %s\n"

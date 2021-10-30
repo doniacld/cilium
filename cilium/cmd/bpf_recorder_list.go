@@ -36,7 +36,7 @@ func init() {
 	command.AddJSONOutput(bpfRecorderListCmd)
 }
 
-func dumpRecorderEntries(maps []interface{}, args ...interface{}) {
+func dumpRecorderEntries(maps []interface{}, _ ...interface{}) {
 	entries := make([]recorder.MapRecord, 0)
 
 	for _, m := range maps {

@@ -166,7 +166,7 @@ func rootWarningMessage() {
 	fmt.Fprint(os.Stderr, "Warning, some of the BPF commands might fail when not run as root\n")
 }
 
-func runDebugInfo(cmd *cobra.Command, args []string) {
+func runDebugInfo(_ *cobra.Command, _ []string) {
 	outputTypes := validateInput()
 
 	resp, err := client.Daemon.GetDebuginfo(nil)
