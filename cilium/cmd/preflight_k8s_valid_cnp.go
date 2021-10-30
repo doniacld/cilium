@@ -47,7 +47,7 @@ const (
 )
 
 func validateCNPs() error {
-	// The internal packages log things. Make sure they follow the setup of of
+	// The internal packages log things. Make sure they follow the setup of
 	// the CLI tool.
 	logging.DefaultLogger.SetFormatter(log.Formatter)
 
@@ -59,16 +59,16 @@ func validateCNPs() error {
 	k8s.Configure(k8sAPIServer, k8sKubeConfigPath, float32(k8sClientQPSLimit), k8sClientBurst)
 
 	if err := k8s.Init(k8sconfig.NewDefaultConfiguration()); err != nil {
-		log.WithError(err).Fatal("Unable to connect to Kubernetes apiserver")
+		log.WithError(err).Fatal("unable to connect to Kubernetes apiserver")
 	}
 
 	restConfig, err := k8s.CreateConfig()
 	if err != nil {
-		return fmt.Errorf("Unable to create rest configuration for k8s CRD: %w", err)
+		return fmt.Errorf("unable to create rest configuration for k8s CRD: %w", err)
 	}
 	apiExtensionsClient, err := apiextensionsclient.NewForConfig(restConfig)
 	if err != nil {
-		return fmt.Errorf("Unable to create API extensions clientset for k8s CRD: %w", err)
+		return fmt.Errorf("unable to create API extensions clientset for k8s CRD: %w", err)
 	}
 
 	npValidator, err := v2_validation.NewNPValidator()
@@ -90,7 +90,8 @@ func validateCNPs() error {
 	if ccnpErr != nil {
 		return ccnpErr
 	}
-	log.Info("All CCNPs and CNPs valid!")
+
+	log.Info("All CCNPs and CNPs are valid!")
 	return nil
 }
 
@@ -154,8 +155,8 @@ func validateNPResources(
 				cnpName = cnp.GetName()
 			}
 			if err := validator(&cnp); err != nil {
-				log.WithField(shortName, cnpName).WithError(err).Error("Unexpected validation error")
-				policyErr = fmt.Errorf("Found invalid %s", shortName)
+				log.WithField(shortName, cnpName).WithError(err).Error("unexpected validation error")
+				policyErr = fmt.Errorf("found invalid %s", shortName)
 			} else {
 				log.WithField(shortName, cnpName).Info("Validation OK!")
 			}

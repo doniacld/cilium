@@ -57,7 +57,7 @@ func detectUnknownFields(policy *unstructured.Unstructured) error {
 	}
 
 	if _, ok := policy.Object["description"]; ok {
-		scopedLog.Warn(warnTopLevelDescriptionField)
+		scopedLog.Error(errorTopLevelDescriptionField)
 		return ErrTopLevelDescriptionFound
 	}
 
@@ -83,7 +83,7 @@ func detectUnknownFields(policy *unstructured.Unstructured) error {
 	default:
 		// We've already validated above that there can only be two kinds: CNP
 		// & CCNP. This is likely to be a developer error if hit, so fatal.
-		scopedLog.WithField("kind", kind).Fatal("Unexpected kind found when processing policy")
+		scopedLog.WithField("kind", kind).Fatal("unexpected kind found when processing policy")
 	}
 	if err != nil {
 		return err
@@ -110,7 +110,7 @@ func detectUnknownFields(policy *unstructured.Unstructured) error {
 			return o < n
 		}),
 	) {
-		scopedLog.Warn(warnUnknownFields)
+		scopedLog.Error(errorUnknownFields)
 		return ErrUnknownFields{
 			extras: r.extras,
 		}
@@ -120,18 +120,18 @@ func detectUnknownFields(policy *unstructured.Unstructured) error {
 }
 
 const (
-	warnTopLevelDescriptionField = "It seems you have a policy with a " +
+	errorTopLevelDescriptionField = "It seems you have a policy with a " +
 		"top-level description. This field is no longer supported. Please migrate " +
 		"your policy's description field under `spec` or `specs`."
 
-	warnUnknownFields = "It seems you have a policy with extra unknown fields. " +
+	errorUnknownFields = "It seems you have a policy with extra unknown fields. " +
 		"Consider removing these fields, as they have no effect. The presence " +
 		"of these fields may have introduced a false sense security, so please " +
 		"check whether your policy is actually behaving as you expect."
 )
 
 // ErrTopLevelDescriptionFound is the error returned if a policy contains a
-// top-level description field. Instead this field should be moved to under
+// top-level description field. Instead, this field should be moved to under
 // (Rule).Description.
 var ErrTopLevelDescriptionFound = errors.New("top-level description field found")
 
@@ -163,7 +163,7 @@ func getFields(u map[string]interface{}) ([]string, error) {
 	}
 
 	// set is used as a lookup for whether we've already seen the field path.
-	// This is useful to dedup entries that match the "matchLabels" or
+	// This is useful to dedupe entries that match the "matchLabels" or
 	// "matchExpressions" field path. Without this lookup, we will return a
 	// slice containing duplicate entries. See example below.
 	//   {

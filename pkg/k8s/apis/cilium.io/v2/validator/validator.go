@@ -105,18 +105,16 @@ func (n *NPValidator) ValidateCNP(cnp *unstructured.Unstructured) error {
 	return nil
 }
 
-var (
-	// We can remove the check for this warning once 1.9 is the oldest supported Cilium version.
-	warnWildcardToFromEndpointMessage = "It seems you have a CiliumClusterwideNetworkPolicy " +
-		"with a wildcard to/from endpoint selector. The behavior of this selector has been " +
-		"changed. The selector now only allows traffic to/from Cilium managed K8s endpoints, " +
-		"instead of acting as a truly empty endpoint selector allowing all traffic. To " +
-		"ensure that the policy behavior does not affect your workloads, consider adding " +
-		"another policy that allows traffic to/from world and cluster entities. For a more " +
-		"detailed discussion on the topic, see https://github.com/cilium/cilium/issues/12844"
+// We can remove the check for this warning once 1.9 is the oldest supported Cilium version.
+const errorWildcardToFromEndpointMessage = "It seems you have a CiliumClusterwideNetworkPolicy " +
+	"with a wildcard to/from endpoint selector. The behavior of this selector has been " +
+	"changed. The selector now only allows traffic to/from Cilium managed K8s endpoints, " +
+	"instead of acting as a truly empty endpoint selector allowing all traffic. To " +
+	"ensure that the policy behavior does not affect your workloads, consider adding " +
+	"another policy that allows traffic to/from world and cluster entities. For a more " +
+	"detailed discussion on the topic, see https://github.com/cilium/cilium/issues/12844"
 
-	logOnce sync.Once
-)
+var logOnce sync.Once
 
 // ValidateCCNP validates the given CCNP accordingly the CCNP validation schema.
 func (n *NPValidator) ValidateCCNP(ccnp *unstructured.Unstructured) error {
@@ -155,11 +153,11 @@ func checkWildCardToFromEndpoint(ccnp *unstructured.Unstructured) error {
 		return err
 	}
 
-	// Print the warninig only once per CCNP.
+	// Print the warning only once per CCNP.
 	if resCCNP.Spec != nil {
 		if containsWildcardToFromEndpoint(resCCNP.Spec) {
 			logOnce.Do(func() {
-				logger.Warning(warnWildcardToFromEndpointMessage)
+				logger.Error(errorWildcardToFromEndpointMessage)
 			})
 			return nil
 		}
@@ -169,7 +167,7 @@ func checkWildCardToFromEndpoint(ccnp *unstructured.Unstructured) error {
 		for _, rule := range resCCNP.Specs {
 			if containsWildcardToFromEndpoint(rule) {
 				logOnce.Do(func() {
-					logger.Warning(warnWildcardToFromEndpointMessage)
+					logger.Error(errorWildcardToFromEndpointMessage)
 				})
 				return nil
 			}
