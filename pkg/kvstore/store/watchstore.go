@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
+	"github.com/cilium/cilium/pkg/metrics/metric"
 )
 
 // WatchStore abstracts the operations allowing to synchronize key/value pairs
@@ -26,6 +27,10 @@ type WatchStore interface {
 	// NumEntries returns the number of entries synchronized from the store.
 	NumEntries() uint64
 
+	// Synced returns whether the initial list of entries has been retrieved from
+	// the kvstore, and new events are currently being watched.
+	Synced() bool
+
 	// Drain emits a deletion event for each known key. It shall be called only
 	// when no watch operation is in progress.
 	Drain()
@@ -35,7 +40,7 @@ type WatchStore interface {
 // by WatchStore implementations.
 type WatchStoreBackend interface {
 	// ListAndWatch creates a new watcher for the given prefix after listing the existing keys.
-	ListAndWatch(ctx context.Context, name, prefix string, chanSize int) *kvstore.Watcher
+	ListAndWatch(ctx context.Context, prefix string, chanSize int) *kvstore.Watcher
 }
 
 type RWSOpt func(*restartableWatchStore)
@@ -73,7 +78,7 @@ type restartableWatchStore struct {
 	observer   Observer
 
 	watching        atomic.Bool
-	synced          bool
+	synced          atomic.Bool
 	onSyncCallbacks []func(ctx context.Context)
 
 	// Using a separate entries counter avoids the need for synchronizing the
@@ -84,13 +89,14 @@ type restartableWatchStore struct {
 
 	log           *logrus.Entry
 	entriesMetric prometheus.Gauge
+	syncMetric    metric.Vec[metric.Gauge]
 }
 
 // NewRestartableWatchStore returns a WatchStore instance which supports
 // restarting the watch operation multiple times, automatically handling
 // the emission of deletion events for all stale entries (if enabled). It
 // shall be restarted only once the previous Watch execution terminated.
-func NewRestartableWatchStore(clusterName string, keyCreator KeyCreator, observer Observer, opts ...RWSOpt) WatchStore {
+func newRestartableWatchStore(clusterName string, keyCreator KeyCreator, observer Observer, m *Metrics, opts ...RWSOpt) WatchStore {
 	rws := &restartableWatchStore{
 		source:     clusterName,
 		keyCreator: keyCreator,
@@ -100,6 +106,7 @@ func NewRestartableWatchStore(clusterName string, keyCreator KeyCreator, observe
 
 		log:           log,
 		entriesMetric: metrics.NoOpGauge,
+		syncMetric:    m.KVStoreInitialSyncCompleted,
 	}
 
 	for _, opt := range opts {
@@ -122,7 +129,7 @@ func (rws *restartableWatchStore) Watch(ctx context.Context, backend WatchStoreB
 	}
 
 	rws.log = rws.log.WithField(logfields.Prefix, prefix)
-	syncedMetric := metrics.KVStoreInitialSyncCompleted.WithLabelValues(
+	syncedMetric := rws.syncMetric.WithLabelValues(
 		kvstore.GetScopeFromKey(prefix), rws.source, "read")
 
 	rws.log.Info("Starting restartable watch store")
@@ -136,6 +143,7 @@ func (rws *restartableWatchStore) Watch(ctx context.Context, backend WatchStoreB
 		rws.log.Info("Stopped restartable watch store")
 		syncedMetric.Set(metrics.BoolToFloat64(false))
 		rws.watching.Store(false)
+		rws.synced.Store(false)
 	}()
 
 	// Mark all known keys as stale.
@@ -144,19 +152,21 @@ func (rws *restartableWatchStore) Watch(ctx context.Context, backend WatchStoreB
 	}
 
 	// The events channel is closed when the context is closed.
-	watcher := backend.ListAndWatch(ctx, prefix, prefix, 0)
+	watcher := backend.ListAndWatch(ctx, prefix, 0)
 	for event := range watcher.Events {
 		if event.Typ == kvstore.EventTypeListDone {
 			rws.log.Debug("Initial synchronization completed")
 			rws.drainKeys(true)
 			syncedMetric.Set(metrics.BoolToFloat64(true))
+			rws.synced.Store(true)
 
-			if !rws.synced {
-				rws.synced = true
-				for _, callback := range rws.onSyncCallbacks {
-					callback(ctx)
-				}
+			for _, callback := range rws.onSyncCallbacks {
+				callback(ctx)
 			}
+
+			// Clear the list of callbacks so that they don't get executed
+			// a second time in case of reconnections.
+			rws.onSyncCallbacks = nil
 
 			continue
 		}
@@ -179,6 +189,12 @@ func (rws *restartableWatchStore) Watch(ctx context.Context, backend WatchStoreB
 // NumEntries returns the number of entries synchronized from the store.
 func (rws *restartableWatchStore) NumEntries() uint64 {
 	return rws.numEntries.Load()
+}
+
+// Synced returns whether the initial list of entries has been retrieved from
+// the kvstore, and new events are currently being watched.
+func (rws *restartableWatchStore) Synced() bool {
+	return rws.synced.Load()
 }
 
 // Drain emits a deletion event for each known key. It shall be called only

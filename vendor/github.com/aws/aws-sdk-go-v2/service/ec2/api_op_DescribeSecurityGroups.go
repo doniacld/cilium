@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
@@ -19,17 +18,7 @@ import (
 	"time"
 )
 
-// Describes the specified security groups or all of your security groups. A
-// security group is for use with instances either in the EC2-Classic platform or
-// in a specific VPC. For more information, see Amazon EC2 security groups
-// (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-network-security.html)
-// in the Amazon Elastic Compute Cloud User Guide and Security groups for your VPC
-// (https://docs.aws.amazon.com/AmazonVPC/latest/UserGuide/VPC_SecurityGroups.html)
-// in the Amazon Virtual Private Cloud User Guide. We are retiring EC2-Classic. We
-// recommend that you migrate from EC2-Classic to a VPC. For more information, see
-// Migrate from EC2-Classic to a VPC
-// (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/vpc-migrate.html) in the
-// Amazon Elastic Compute Cloud User Guide.
+// Describes the specified security groups or all of your security groups.
 func (c *Client) DescribeSecurityGroups(ctx context.Context, params *DescribeSecurityGroupsInput, optFns ...func(*Options)) (*DescribeSecurityGroupsOutput, error) {
 	if params == nil {
 		params = &DescribeSecurityGroupsInput{}
@@ -49,120 +38,80 @@ type DescribeSecurityGroupsInput struct {
 
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	// The filters. If using multiple filters for rules, the results include security
 	// groups for which any combination of rules - not necessarily a single rule -
 	// match all filters.
-	//
-	// * description - The description of the security group.
-	//
-	// *
-	// egress.ip-permission.cidr - An IPv4 CIDR block for an outbound security group
-	// rule.
-	//
-	// * egress.ip-permission.from-port - For an outbound rule, the start of
-	// port range for the TCP and UDP protocols, or an ICMP type number.
-	//
-	// *
-	// egress.ip-permission.group-id - The ID of a security group that has been
-	// referenced in an outbound security group rule.
-	//
-	// *
-	// egress.ip-permission.group-name - The name of a security group that is
-	// referenced in an outbound security group rule.
-	//
-	// * egress.ip-permission.ipv6-cidr
-	// - An IPv6 CIDR block for an outbound security group rule.
-	//
-	// *
-	// egress.ip-permission.prefix-list-id - The ID of a prefix list to which a
-	// security group rule allows outbound access.
-	//
-	// * egress.ip-permission.protocol -
-	// The IP protocol for an outbound security group rule (tcp | udp | icmp, a
-	// protocol number, or -1 for all protocols).
-	//
-	// * egress.ip-permission.to-port - For
-	// an outbound rule, the end of port range for the TCP and UDP protocols, or an
-	// ICMP code.
-	//
-	// * egress.ip-permission.user-id - The ID of an Amazon Web Services
-	// account that has been referenced in an outbound security group rule.
-	//
-	// * group-id
-	// - The ID of the security group.
-	//
-	// * group-name - The name of the security
-	// group.
-	//
-	// * ip-permission.cidr - An IPv4 CIDR block for an inbound security group
-	// rule.
-	//
-	// * ip-permission.from-port - For an inbound rule, the start of port range
-	// for the TCP and UDP protocols, or an ICMP type number.
-	//
-	// * ip-permission.group-id
-	// - The ID of a security group that has been referenced in an inbound security
-	// group rule.
-	//
-	// * ip-permission.group-name - The name of a security group that is
-	// referenced in an inbound security group rule.
-	//
-	// * ip-permission.ipv6-cidr - An
-	// IPv6 CIDR block for an inbound security group rule.
-	//
-	// *
-	// ip-permission.prefix-list-id - The ID of a prefix list from which a security
-	// group rule allows inbound access.
-	//
-	// * ip-permission.protocol - The IP protocol
-	// for an inbound security group rule (tcp | udp | icmp, a protocol number, or -1
-	// for all protocols).
-	//
-	// * ip-permission.to-port - For an inbound rule, the end of
-	// port range for the TCP and UDP protocols, or an ICMP code.
-	//
-	// *
-	// ip-permission.user-id - The ID of an Amazon Web Services account that has been
-	// referenced in an inbound security group rule.
-	//
-	// * owner-id - The Amazon Web
-	// Services account ID of the owner of the security group.
-	//
-	// * tag: - The key/value
-	// combination of a tag assigned to the resource. Use the tag key in the filter
-	// name and the tag value as the filter value. For example, to find all resources
-	// that have a tag with the key Owner and the value TeamA, specify tag:Owner for
-	// the filter name and TeamA for the filter value.
-	//
-	// * tag-key - The key of a tag
-	// assigned to the resource. Use this filter to find all resources assigned a tag
-	// with a specific key, regardless of the tag value.
-	//
-	// * vpc-id - The ID of the VPC
-	// specified when the security group was created.
+	//   - description - The description of the security group.
+	//   - egress.ip-permission.cidr - An IPv4 CIDR block for an outbound security
+	//   group rule.
+	//   - egress.ip-permission.from-port - For an outbound rule, the start of port
+	//   range for the TCP and UDP protocols, or an ICMP type number.
+	//   - egress.ip-permission.group-id - The ID of a security group that has been
+	//   referenced in an outbound security group rule.
+	//   - egress.ip-permission.group-name - The name of a security group that is
+	//   referenced in an outbound security group rule.
+	//   - egress.ip-permission.ipv6-cidr - An IPv6 CIDR block for an outbound security
+	//   group rule.
+	//   - egress.ip-permission.prefix-list-id - The ID of a prefix list to which a
+	//   security group rule allows outbound access.
+	//   - egress.ip-permission.protocol - The IP protocol for an outbound security
+	//   group rule ( tcp | udp | icmp , a protocol number, or -1 for all protocols).
+	//   - egress.ip-permission.to-port - For an outbound rule, the end of port range
+	//   for the TCP and UDP protocols, or an ICMP code.
+	//   - egress.ip-permission.user-id - The ID of an Amazon Web Services account that
+	//   has been referenced in an outbound security group rule.
+	//   - group-id - The ID of the security group.
+	//   - group-name - The name of the security group.
+	//   - ip-permission.cidr - An IPv4 CIDR block for an inbound security group rule.
+	//   - ip-permission.from-port - For an inbound rule, the start of port range for
+	//   the TCP and UDP protocols, or an ICMP type number.
+	//   - ip-permission.group-id - The ID of a security group that has been referenced
+	//   in an inbound security group rule.
+	//   - ip-permission.group-name - The name of a security group that is referenced
+	//   in an inbound security group rule.
+	//   - ip-permission.ipv6-cidr - An IPv6 CIDR block for an inbound security group
+	//   rule.
+	//   - ip-permission.prefix-list-id - The ID of a prefix list from which a security
+	//   group rule allows inbound access.
+	//   - ip-permission.protocol - The IP protocol for an inbound security group rule (
+	//   tcp | udp | icmp , a protocol number, or -1 for all protocols).
+	//   - ip-permission.to-port - For an inbound rule, the end of port range for the
+	//   TCP and UDP protocols, or an ICMP code.
+	//   - ip-permission.user-id - The ID of an Amazon Web Services account that has
+	//   been referenced in an inbound security group rule.
+	//   - owner-id - The Amazon Web Services account ID of the owner of the security
+	//   group.
+	//   - tag : - The key/value combination of a tag assigned to the resource. Use the
+	//   tag key in the filter name and the tag value as the filter value. For example,
+	//   to find all resources that have a tag with the key Owner and the value TeamA ,
+	//   specify tag:Owner for the filter name and TeamA for the filter value.
+	//   - tag-key - The key of a tag assigned to the resource. Use this filter to find
+	//   all resources assigned a tag with a specific key, regardless of the tag value.
+	//   - vpc-id - The ID of the VPC specified when the security group was created.
 	Filters []types.Filter
 
 	// The IDs of the security groups. Required for security groups in a nondefault
 	// VPC. Default: Describes all of your security groups.
 	GroupIds []string
 
-	// [EC2-Classic and default VPC only] The names of the security groups. You can
-	// specify either the security group name or the security group ID. For security
-	// groups in a nondefault VPC, use the group-name filter to describe security
-	// groups by name. Default: Describes all of your security groups.
+	// [Default VPC] The names of the security groups. You can specify either the
+	// security group name or the security group ID. Default: Describes all of your
+	// security groups.
 	GroupNames []string
 
-	// The maximum number of results to return in a single call. To retrieve the
-	// remaining results, make another request with the returned NextToken value. This
-	// value can be between 5 and 1000. If this parameter is not specified, then all
-	// results are returned.
+	// The maximum number of items to return for this request. To get the next page of
+	// items, make another request with the token returned in the output. This value
+	// can be between 5 and 1000. If this parameter is not specified, then all items
+	// are returned. For more information, see Pagination (https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Query-Requests.html#api-pagination)
+	// .
 	MaxResults *int32
 
-	// The token to request the next page of results.
+	// The token returned from a previous paginated request. Pagination continues from
+	// the end of the items returned by the previous request.
 	NextToken *string
 
 	noSmithyDocumentSerde
@@ -170,8 +119,8 @@ type DescribeSecurityGroupsInput struct {
 
 type DescribeSecurityGroupsOutput struct {
 
-	// The token to use to retrieve the next page of results. This value is null when
-	// there are no more results to return.
+	// The token to include in another request to get the next page of items. This
+	// value is null when there are no more items to return.
 	NextToken *string
 
 	// Information about the security groups.
@@ -184,6 +133,9 @@ type DescribeSecurityGroupsOutput struct {
 }
 
 func (c *Client) addOperationDescribeSecurityGroupsMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeSecurityGroups{}, middleware.After)
 	if err != nil {
 		return err
@@ -192,34 +144,38 @@ func (c *Client) addOperationDescribeSecurityGroupsMiddlewares(stack *middleware
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeSecurityGroups"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -228,7 +184,13 @@ func (c *Client) addOperationDescribeSecurityGroupsMiddlewares(stack *middleware
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeSecurityGroups(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -238,6 +200,9 @@ func (c *Client) addOperationDescribeSecurityGroupsMiddlewares(stack *middleware
 		return err
 	}
 	if err = addRequestResponseLogging(stack, options); err != nil {
+		return err
+	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
 	return nil
@@ -254,10 +219,11 @@ var _ DescribeSecurityGroupsAPIClient = (*Client)(nil)
 // DescribeSecurityGroupsPaginatorOptions is the paginator options for
 // DescribeSecurityGroups
 type DescribeSecurityGroupsPaginatorOptions struct {
-	// The maximum number of results to return in a single call. To retrieve the
-	// remaining results, make another request with the returned NextToken value. This
-	// value can be between 5 and 1000. If this parameter is not specified, then all
-	// results are returned.
+	// The maximum number of items to return for this request. To get the next page of
+	// items, make another request with the token returned in the output. This value
+	// can be between 5 and 1000. If this parameter is not specified, then all items
+	// are returned. For more information, see Pagination (https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Query-Requests.html#api-pagination)
+	// .
 	Limit int32
 
 	// Set to true if pagination should stop if the service returns a pagination token
@@ -344,16 +310,26 @@ type SecurityGroupExistsWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// SecurityGroupExistsWaiter will use default minimum delay of 5 seconds. Note that
 	// MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, SecurityGroupExistsWaiter will use default max delay of 120 seconds.
-	// Note that MaxDelay must resolve to value greater than or equal to the MinDelay.
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, SecurityGroupExistsWaiter will use default max delay of 120
+	// seconds. Note that MaxDelay must resolve to value greater than or equal to the
+	// MinDelay.
 	MaxDelay time.Duration
 
 	// LogWaitAttempts is used to enable logging for waiter retry attempts
@@ -393,9 +369,9 @@ func NewSecurityGroupExistsWaiter(client DescribeSecurityGroupsAPIClient, optFns
 	}
 }
 
-// Wait calls the waiter function for SecurityGroupExists waiter. The maxWaitDur is
-// the maximum wait duration the waiter will wait. The maxWaitDur is required and
-// must be greater than zero.
+// Wait calls the waiter function for SecurityGroupExists waiter. The maxWaitDur
+// is the maximum wait duration the waiter will wait. The maxWaitDur is required
+// and must be greater than zero.
 func (w *SecurityGroupExistsWaiter) Wait(ctx context.Context, params *DescribeSecurityGroupsInput, maxWaitDur time.Duration, optFns ...func(*SecurityGroupExistsWaiterOptions)) error {
 	_, err := w.WaitForOutput(ctx, params, maxWaitDur, optFns...)
 	return err
@@ -444,6 +420,9 @@ func (w *SecurityGroupExistsWaiter) WaitForOutput(ctx context.Context, params *D
 
 		out, err := w.client.DescribeSecurityGroups(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -518,7 +497,6 @@ func newServiceMetadataMiddleware_opDescribeSecurityGroups(region string) *awsmi
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeSecurityGroups",
 	}
 }

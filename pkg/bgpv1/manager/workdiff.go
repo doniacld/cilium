@@ -6,7 +6,8 @@ package manager
 import (
 	"fmt"
 
-	"github.com/cilium/cilium/pkg/bgpv1/agent"
+	"github.com/cilium/cilium/pkg/bgpv1/manager/instance"
+	v2api "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	v2alpha1api "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
 )
 
@@ -16,31 +17,30 @@ import (
 type reconcileDiff struct {
 	// incoming CiliumBGPVirtualRouter configs mapped by their
 	// local ASN.
-	seen map[int]*v2alpha1api.CiliumBGPVirtualRouter
-	// the state of the bgp control plane at the time of this reconcileDiff's
-	// creation.
-	state *agent.ControlPlaneState
+	seen map[int64]*v2alpha1api.CiliumBGPVirtualRouter
+	// The local CiliumNode information at the time which reconciliation was triggered.
+	ciliumNode *v2api.CiliumNode
 	// Local ASNs which BgpServers must be instantiated, configured,
 	// and added to the manager. Intended key for `seen` map.
-	register []int
+	register []int64
 	// Local ASNs which BgpServers exist for but current policy has marked
 	// for removal. Intended key for Manager's LocalASNMap.
-	withdraw []int
+	withdraw []int64
 	// Local ASNs which BgpServers exist for but policy associated with server
 	// may have been updated and needs further reconciliation.
 	// Intended key for 'seen' map.
-	reconcile []int
+	reconcile []int64
 }
 
 // newReconcileDiff constructs a new *reconcileDiff with all internal instructures
 // initialized.
-func newReconcileDiff(state *agent.ControlPlaneState) *reconcileDiff {
+func newReconcileDiff(ciliumNode *v2api.CiliumNode) *reconcileDiff {
 	return &reconcileDiff{
-		seen:      make(map[int]*v2alpha1api.CiliumBGPVirtualRouter),
-		state:     state,
-		register:  []int{},
-		withdraw:  []int{},
-		reconcile: []int{},
+		seen:       make(map[int64]*v2alpha1api.CiliumBGPVirtualRouter),
+		ciliumNode: ciliumNode,
+		register:   []int64{},
+		withdraw:   []int64{},
+		reconcile:  []int64{},
 	}
 }
 
@@ -51,10 +51,10 @@ func newReconcileDiff(state *agent.ControlPlaneState) *reconcileDiff {
 // withdraw, or reconcile in the reconcileDiff's respective fields.
 func (wd *reconcileDiff) diff(m LocalASNMap, policy *v2alpha1api.CiliumBGPPeeringPolicy) error {
 	if err := wd.registerOrReconcileDiff(m, policy); err != nil {
-		return fmt.Errorf("encountered error creating reoncile diff: %v", err)
+		return fmt.Errorf("encountered error creating register or reconcile diff: %v", err)
 	}
-	if err := wd.withdrawDiff(m, policy); err != nil {
-		return fmt.Errorf("encountered error creating reconcile diff: %v", err)
+	if err := wd.withdrawDiff(m); err != nil {
+		return fmt.Errorf("encountered error creating withdraw diff: %v", err)
 	}
 	return nil
 }
@@ -103,10 +103,97 @@ func (wd *reconcileDiff) registerOrReconcileDiff(m LocalASNMap, policy *v2alpha1
 	return nil
 }
 
-// withdrawDiff will populate the `remove` field of a reconcileDiff, indicating which
+// withdrawDiff will populate the `withdraw` field of a reconcileDiff, indicating which
 // existing BgpServers must disconnected and removed from the Manager.
-func (wd *reconcileDiff) withdrawDiff(m LocalASNMap, policy *v2alpha1api.CiliumBGPPeeringPolicy) error {
+func (wd *reconcileDiff) withdrawDiff(m LocalASNMap) error {
 	for k := range m {
+		if _, ok := wd.seen[k]; !ok {
+			wd.withdraw = append(wd.withdraw, k)
+		}
+	}
+	return nil
+}
+
+type reconcileDiffV2 struct {
+	seen map[string]*v2alpha1api.CiliumBGPNodeInstance
+
+	ciliumNode *v2api.CiliumNode
+
+	register  []string
+	withdraw  []string
+	reconcile []string
+}
+
+// newReconcileDiffV2 constructs a new *reconcileDiffV2 with all internal structures
+// initialized.
+func newReconcileDiffV2(ciliumNode *v2api.CiliumNode) *reconcileDiffV2 {
+	return &reconcileDiffV2{
+		seen:       make(map[string]*v2alpha1api.CiliumBGPNodeInstance),
+		ciliumNode: ciliumNode,
+		register:   []string{},
+		withdraw:   []string{},
+		reconcile:  []string{},
+	}
+}
+
+func (wd *reconcileDiffV2) diff(existingInstances map[string]*instance.BGPInstance, desiredConfig *v2alpha1api.CiliumBGPNodeConfig) error {
+	if err := wd.registerOrReconcileDiff(existingInstances, desiredConfig); err != nil {
+		return fmt.Errorf("encountered error creating register or reconcile diff: %v", err)
+	}
+	if err := wd.withdrawDiff(existingInstances); err != nil {
+		return fmt.Errorf("encountered error creating withdraw diff: %v", err)
+	}
+	return nil
+}
+
+// String provides a string representation of the reconcileDiff.
+func (wd *reconcileDiffV2) String() string {
+	return fmt.Sprintf("Registering: %v Withdrawing: %v Reconciling: %v",
+		wd.register,
+		wd.withdraw,
+		wd.reconcile,
+	)
+}
+
+// empty informs the caller whether the reconcileDiff contains any work to undertake.
+func (wd *reconcileDiffV2) empty() bool {
+	switch {
+	case len(wd.register) > 0:
+		fallthrough
+	case len(wd.withdraw) > 0:
+		fallthrough
+	case len(wd.reconcile) > 0:
+		return false
+	}
+	return true
+}
+
+// registerOrReconcileDiff will populate the `seen` field of the reconcileDiff with `policy`,
+// compute BgpServers which must be registered and mark existing BgpServers for
+// reconciliation of their configuration.
+//
+// since registerOrReconcileDiff populates the `seen` field of a diff, this method should always
+// be called first when computing a reconcileDiff.
+func (wd *reconcileDiffV2) registerOrReconcileDiff(existingInstances map[string]*instance.BGPInstance, desiredConfig *v2alpha1api.CiliumBGPNodeConfig) error {
+	for i, config := range desiredConfig.Spec.BGPInstances {
+		if _, ok := wd.seen[config.Name]; !ok {
+			wd.seen[config.Name] = &desiredConfig.Spec.BGPInstances[i]
+		} else {
+			return fmt.Errorf("encountered duplicate BGP instance with name %s", config.Name)
+		}
+		if _, ok := existingInstances[config.Name]; !ok {
+			wd.register = append(wd.register, config.Name)
+		} else {
+			wd.reconcile = append(wd.reconcile, config.Name)
+		}
+	}
+	return nil
+}
+
+// withdrawDiff will populate the `withdraw` field of a reconcileDiff, indicating which
+// existing BgpInstances must be disconnected and removed from the Manager.
+func (wd *reconcileDiffV2) withdrawDiff(existingInstances map[string]*instance.BGPInstance) error {
+	for k := range existingInstances {
 		if _, ok := wd.seen[k]; !ok {
 			wd.withdraw = append(wd.withdraw, k)
 		}

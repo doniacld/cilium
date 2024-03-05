@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
@@ -19,10 +18,9 @@ import (
 	"time"
 )
 
-// Describes the specified key pairs or all of your key pairs. For more information
-// about key pairs, see Amazon EC2 key pairs
-// (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html) in the
-// Amazon Elastic Compute Cloud User Guide.
+// Describes the specified key pairs or all of your key pairs. For more
+// information about key pairs, see Amazon EC2 key pairs (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html)
+// in the Amazon Elastic Compute Cloud User Guide.
 func (c *Client) DescribeKeyPairs(ctx context.Context, params *DescribeKeyPairsInput, optFns ...func(*Options)) (*DescribeKeyPairsOutput, error) {
 	if params == nil {
 		params = &DescribeKeyPairsInput{}
@@ -42,31 +40,23 @@ type DescribeKeyPairsInput struct {
 
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	// The filters.
-	//
-	// * key-pair-id - The ID of the key pair.
-	//
-	// * fingerprint - The
-	// fingerprint of the key pair.
-	//
-	// * key-name - The name of the key pair.
-	//
-	// * tag-key
-	// - The key of a tag assigned to the resource. Use this filter to find all
-	// resources assigned a tag with a specific key, regardless of the tag value.
-	//
-	// *
-	// tag: - The key/value combination of a tag assigned to the resource. Use the tag
-	// key in the filter name and the tag value as the filter value. For example, to
-	// find all resources that have a tag with the key Owner and the value TeamA,
-	// specify tag:Owner for the filter name and TeamA for the filter value.
+	//   - key-pair-id - The ID of the key pair.
+	//   - fingerprint - The fingerprint of the key pair.
+	//   - key-name - The name of the key pair.
+	//   - tag-key - The key of a tag assigned to the resource. Use this filter to find
+	//   all resources assigned a tag with a specific key, regardless of the tag value.
+	//   - tag : - The key/value combination of a tag assigned to the resource. Use the
+	//   tag key in the filter name and the tag value as the filter value. For example,
+	//   to find all resources that have a tag with the key Owner and the value TeamA ,
+	//   specify tag:Owner for the filter name and TeamA for the filter value.
 	Filters []types.Filter
 
-	// If true, the public key material is included in the response. Default: false
+	// If true , the public key material is included in the response. Default: false
 	IncludePublicKey *bool
 
 	// The key pair names. Default: Describes all of your key pairs.
@@ -90,6 +80,9 @@ type DescribeKeyPairsOutput struct {
 }
 
 func (c *Client) addOperationDescribeKeyPairsMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeKeyPairs{}, middleware.After)
 	if err != nil {
 		return err
@@ -98,34 +91,38 @@ func (c *Client) addOperationDescribeKeyPairsMiddlewares(stack *middleware.Stack
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeKeyPairs"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -134,7 +131,13 @@ func (c *Client) addOperationDescribeKeyPairsMiddlewares(stack *middleware.Stack
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeKeyPairs(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -144,6 +147,9 @@ func (c *Client) addOperationDescribeKeyPairsMiddlewares(stack *middleware.Stack
 		return err
 	}
 	if err = addRequestResponseLogging(stack, options); err != nil {
+		return err
+	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
 	return nil
@@ -163,15 +169,24 @@ type KeyPairExistsWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// KeyPairExistsWaiter will use default minimum delay of 5 seconds. Note that
 	// MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, KeyPairExistsWaiter will use default max delay of 120 seconds. Note
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, KeyPairExistsWaiter will use default max delay of 120 seconds. Note
 	// that MaxDelay must resolve to value greater than or equal to the MinDelay.
 	MaxDelay time.Duration
 
@@ -220,9 +235,10 @@ func (w *KeyPairExistsWaiter) Wait(ctx context.Context, params *DescribeKeyPairs
 	return err
 }
 
-// WaitForOutput calls the waiter function for KeyPairExists waiter and returns the
-// output of the successful operation. The maxWaitDur is the maximum wait duration
-// the waiter will wait. The maxWaitDur is required and must be greater than zero.
+// WaitForOutput calls the waiter function for KeyPairExists waiter and returns
+// the output of the successful operation. The maxWaitDur is the maximum wait
+// duration the waiter will wait. The maxWaitDur is required and must be greater
+// than zero.
 func (w *KeyPairExistsWaiter) WaitForOutput(ctx context.Context, params *DescribeKeyPairsInput, maxWaitDur time.Duration, optFns ...func(*KeyPairExistsWaiterOptions)) (*DescribeKeyPairsOutput, error) {
 	if maxWaitDur <= 0 {
 		return nil, fmt.Errorf("maximum wait time for waiter must be greater than zero")
@@ -262,6 +278,9 @@ func (w *KeyPairExistsWaiter) WaitForOutput(ctx context.Context, params *Describ
 
 		out, err := w.client.DescribeKeyPairs(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -336,7 +355,6 @@ func newServiceMetadataMiddleware_opDescribeKeyPairs(region string) *awsmiddlewa
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeKeyPairs",
 	}
 }

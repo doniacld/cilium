@@ -100,7 +100,8 @@ func newHubbleObserver(t testing.TB, nodeName string, numFlows int) *observer.Lo
 	queueSize := numFlows
 
 	pp := noopParser(t)
-	s, err := observer.NewLocalServer(pp, log,
+	nsMgr := observer.NewNamespaceManager()
+	s, err := observer.NewLocalServer(pp, nsMgr, log,
 		observeroption.WithMaxFlows(container.Capacity65535),
 		observeroption.WithMonitorBuffer(queueSize),
 	)
@@ -215,7 +216,7 @@ func benchmarkRelayGetFlows(b *testing.B, withFieldMask bool) {
 			grpc.WithReturnConnectionError(),
 		},
 	}
-	plr := &testutils.FakePeerListReporter{
+	plr := &testutils.FakePeerLister{
 		OnList: func() []poolTypes.Peer {
 			ret := make([]poolTypes.Peer, len(peers))
 			for i := range peers {
@@ -266,6 +267,7 @@ func benchmarkRelayGetFlows(b *testing.B, withFieldMask bool) {
 			"l4.TCP.source_port",
 		)
 		require.NoError(b, err)
+		getFlowsReq.FieldMask = fieldmask
 		getFlowsReq.Experimental = &observerpb.GetFlowsRequest_Experimental{
 			FieldMask: fieldmask,
 		}

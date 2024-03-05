@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/identity/cache"
 )
 
@@ -40,13 +41,12 @@ type ResourceID string
 type ResourceKind string
 
 var (
-	ResourceKindCNP                  = ResourceKind("cnp")
-	ResourceKindCCNP                 = ResourceKind("ccnp")
-	ResourceKindEndpoint             = ResourceKind("ep")
-	ResourceKindEndpointSlice        = ResourceKind("endpointslices")
-	ResourceKindEndpointSlicev1beta1 = ResourceKind("endpointslices_v1beta1")
-	ResourceKindNetpol               = ResourceKind("netpol")
-	ResourceKindNode                 = ResourceKind("node")
+	ResourceKindCNP      = ResourceKind("cnp")
+	ResourceKindCCNP     = ResourceKind("ccnp")
+	ResourceKindDaemon   = ResourceKind("daemon")
+	ResourceKindEndpoint = ResourceKind("ep")
+	ResourceKindNetpol   = ResourceKind("netpol")
+	ResourceKindNode     = ResourceKind("node")
 )
 
 // NewResourceID returns a ResourceID populated with the standard fields for
@@ -60,12 +60,6 @@ func NewResourceID(kind ResourceKind, namespace, name string) ResourceID {
 	str.WriteRune('/')
 	str.WriteString(name)
 	return ResourceID(str.String())
-}
-
-// NodeIDHandler is responsible for the management of node identities.
-type NodeIDHandler interface {
-	AllocateNodeID(net.IP) uint16
-	GetNodeIP(uint16) string
 }
 
 // TunnelPeer is the IP address of the host associated with this prefix. This is
@@ -93,4 +87,23 @@ func (e EncryptKey) Uint8() uint8 {
 
 func (e EncryptKey) String() string {
 	return strconv.Itoa(int(e))
+}
+
+// RequestedIdentity is a desired numeric identity for the prefix. When the
+// prefix is next injected, this numeric ID will be requested from the local
+// allocator. If the allocator can accommodate that request, it will do so.
+// In order for this to be useful, the prefix must not already have an identity
+// (or its set of labels must have changed), and that numeric identity must
+// be free.
+// Thus, the numeric ID should have already been held-aside in the allocator
+// using WithholdLocalIdentities(). That will ensure the numeric ID remains free
+// for the prefix to request.
+type RequestedIdentity identity.NumericIdentity
+
+func (id RequestedIdentity) IsValid() bool {
+	return id != 0
+}
+
+func (id RequestedIdentity) ID() identity.NumericIdentity {
+	return identity.NumericIdentity(id)
 }

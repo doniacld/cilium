@@ -10,7 +10,6 @@ import (
 	"io"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
@@ -27,7 +26,9 @@ import (
 	observerTypes "github.com/cilium/cilium/pkg/hubble/observer/types"
 	"github.com/cilium/cilium/pkg/hubble/parser"
 	parserErrors "github.com/cilium/cilium/pkg/hubble/parser/errors"
+	"github.com/cilium/cilium/pkg/hubble/parser/fieldmask"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
+	"github.com/cilium/cilium/pkg/time"
 )
 
 // DefaultOptions to include in the server. Other packages may extend this
@@ -52,7 +53,7 @@ type LocalObserverServer struct {
 	log logrus.FieldLogger
 
 	// payloadParser decodes flowpb.Payload into flowpb.Flow
-	payloadParser *parser.Parser
+	payloadParser parser.Decoder
 
 	opts observeroption.Options
 
@@ -60,12 +61,15 @@ type LocalObserverServer struct {
 	startTime time.Time
 
 	// numObservedFlows counts how many flows have been observed
-	numObservedFlows uint64
+	numObservedFlows atomic.Uint64
+
+	namespaceManager NamespaceManager
 }
 
 // NewLocalServer returns a new local observer server.
 func NewLocalServer(
-	payloadParser *parser.Parser,
+	payloadParser parser.Decoder,
+	namespaceManager NamespaceManager,
 	logger logrus.FieldLogger,
 	options ...observeroption.Option,
 ) (*LocalObserverServer, error) {
@@ -83,13 +87,14 @@ func NewLocalServer(
 	}).Info("Configuring Hubble server")
 
 	s := &LocalObserverServer{
-		log:           logger,
-		ring:          container.NewRing(opts.MaxFlows),
-		events:        make(chan *observerTypes.MonitorEvent, opts.MonitorBuffer),
-		stopped:       make(chan struct{}),
-		payloadParser: payloadParser,
-		startTime:     time.Now(),
-		opts:          opts,
+		log:              logger,
+		ring:             container.NewRing(opts.MaxFlows),
+		events:           make(chan *observerTypes.MonitorEvent, opts.MonitorBuffer),
+		stopped:          make(chan struct{}),
+		payloadParser:    payloadParser,
+		startTime:        time.Now(),
+		namespaceManager: namespaceManager,
+		opts:             opts,
 	}
 
 	for _, f := range s.opts.OnServerInit {
@@ -142,6 +147,8 @@ nextEvent:
 		}
 
 		if flow, ok := ev.Event.(*flowpb.Flow); ok {
+			// track namespaces seen.
+			s.trackNamespaces(flow)
 			for _, f := range s.opts.OnDecodedFlow {
 				stop, err := f.OnDecodedFlow(ctx, flow)
 				if err != nil {
@@ -152,7 +159,7 @@ nextEvent:
 				}
 			}
 
-			atomic.AddUint64(&s.numObservedFlows, 1)
+			s.numObservedFlows.Add(1)
 		}
 
 		for _, f := range s.opts.OnDecodedEvent {
@@ -190,7 +197,7 @@ func (s *LocalObserverServer) GetStopped() chan struct{} {
 }
 
 // GetPayloadParser implements GRPCServer.GetPayloadParser.
-func (s *LocalObserverServer) GetPayloadParser() *parser.Parser {
+func (s *LocalObserverServer) GetPayloadParser() parser.Decoder {
 	return s.payloadParser
 }
 
@@ -203,18 +210,30 @@ func (s *LocalObserverServer) GetOptions() observeroption.Options {
 func (s *LocalObserverServer) ServerStatus(
 	ctx context.Context, req *observerpb.ServerStatusRequest,
 ) (*observerpb.ServerStatusResponse, error) {
+
+	rate, err := getFlowRate(s.GetRingBuffer(), time.Now())
+	if err != nil {
+		s.log.WithError(err).Warn("Failed to get flow rate")
+	}
+
 	return &observerpb.ServerStatusResponse{
 		Version:   build.ServerVersion.String(),
 		MaxFlows:  s.GetRingBuffer().Cap(),
 		NumFlows:  s.GetRingBuffer().Len(),
-		SeenFlows: atomic.LoadUint64(&s.numObservedFlows),
+		SeenFlows: s.numObservedFlows.Load(),
 		UptimeNs:  uint64(time.Since(s.startTime).Nanoseconds()),
+		FlowsRate: rate,
 	}, nil
 }
 
 // GetNodes implements observerpb.ObserverClient.GetNodes.
 func (s *LocalObserverServer) GetNodes(ctx context.Context, req *observerpb.GetNodesRequest) (*observerpb.GetNodesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "GetNodes not implemented")
+}
+
+// GetNamespaces implements observerpb.ObserverClient.GetNamespaces.
+func (s *LocalObserverServer) GetNamespaces(ctx context.Context, req *observerpb.GetNamespacesRequest) (*observerpb.GetNamespacesResponse, error) {
+	return &observerpb.GetNamespacesResponse{Namespaces: s.namespaceManager.GetNamespaces()}, nil
 }
 
 // GetFlows implements the proto method for client requests.
@@ -276,15 +295,20 @@ func (s *LocalObserverServer) GetFlows(
 		return err
 	}
 
-	mask, err := createFilter(req.Experimental.GetFieldMask())
+	fm := req.GetFieldMask()
+	if len(fm.GetPaths()) == 0 {
+		// TODO: Remove req.Experimental.GetFieldMask after v1.17
+		fm = req.Experimental.GetFieldMask()
+	}
+	mask, err := fieldmask.New(fm)
 	if err != nil {
 		return err
 	}
 
 	var flow *flowpb.Flow
-	if mask.active() {
+	if mask.Active() {
 		flow = new(flowpb.Flow)
-		mask.alloc(flow.ProtoReflect())
+		mask.Alloc(flow.ProtoReflect())
 	}
 
 nextEvent:
@@ -311,9 +335,9 @@ nextEvent:
 					continue nextEvent
 				}
 			}
-			if mask.active() {
+			if mask.Active() {
 				// Copy only fields in the mask
-				mask.copy(flow.ProtoReflect(), ev.ProtoReflect())
+				mask.Copy(flow.ProtoReflect(), ev.ProtoReflect())
 				ev = flow
 			}
 			resp = &observerpb.GetFlowsResponse{
@@ -610,6 +634,22 @@ func (r *eventsReader) Next(ctx context.Context) (*v1.Event, error) {
 	}
 }
 
+func (s *LocalObserverServer) trackNamespaces(flow *flowpb.Flow) {
+	// track namespaces seen.
+	if srcNs := flow.GetSource().GetNamespace(); srcNs != "" {
+		s.namespaceManager.AddNamespace(&observerpb.Namespace{
+			Namespace: srcNs,
+			Cluster:   nodeTypes.GetClusterName(),
+		})
+	}
+	if dstNs := flow.GetDestination().GetNamespace(); dstNs != "" {
+		s.namespaceManager.AddNamespace(&observerpb.Namespace{
+			Namespace: dstNs,
+			Cluster:   nodeTypes.GetClusterName(),
+		})
+	}
+}
+
 func validateRequest(req genericRequest) error {
 	if req.GetFirst() && req.GetFollow() {
 		return status.Errorf(codes.InvalidArgument, "first cannot be specified with follow")
@@ -680,4 +720,44 @@ func newRingReader(ring *container.Ring, req genericRequest, whitelist, blacklis
 		}
 	}
 	return container.NewRingReader(ring, idx), nil
+}
+
+func getFlowRate(ring *container.Ring, at time.Time) (float64, error) {
+	reader := container.NewRingReader(ring, ring.LastWriteParallel())
+	count := 0
+	since := at.Add(-1 * time.Minute)
+	var lastSeenEvent *v1.Event
+	for {
+		e, err := reader.Previous()
+		lost := e.GetLostEvent()
+		if lost != nil && lost.Source == flowpb.LostEventSource_HUBBLE_RING_BUFFER {
+			// a lost event means we read the complete ring buffer
+			// if we read at least one flow, update `since` to calculate the rate over the available time range
+			if lastSeenEvent != nil {
+				since = lastSeenEvent.Timestamp.AsTime()
+			}
+			break
+		} else if errors.Is(err, io.EOF) {
+			// an EOF error means the ring buffer is empty, ignore error and continue
+			break
+		} else if err != nil {
+			// unexpected error
+			return 0, err
+		}
+		if _, isFlowEvent := e.Event.(*flowpb.Flow); !isFlowEvent {
+			// ignore non flow events
+			continue
+		}
+		if err := e.Timestamp.CheckValid(); err != nil {
+			return 0, err
+		}
+		ts := e.Timestamp.AsTime()
+		if ts.Before(since) {
+			// scanned the last minute, exit loop
+			break
+		}
+		lastSeenEvent = e
+		count++
+	}
+	return float64(count) / at.Sub(since).Seconds(), nil
 }

@@ -4,6 +4,7 @@
 package redirectpolicy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -12,8 +13,8 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/asm"
 	"github.com/sirupsen/logrus"
-	"k8s.io/client-go/tools/cache"
 
+	agentK8s "github.com/cilium/cilium/daemon/k8s"
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/datapath/linux/probes"
 	"github.com/cilium/cilium/pkg/k8s"
@@ -27,7 +28,6 @@ import (
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/service"
 	serviceStore "github.com/cilium/cilium/pkg/service/store"
-	"github.com/cilium/cilium/pkg/u8proto"
 )
 
 var (
@@ -46,10 +46,6 @@ type svcCache interface {
 	GetServiceFrontendIP(svcID k8s.ServiceID, svcType lb.SVCType) net.IP
 }
 
-type StoreGetter interface {
-	GetStore(name string) cache.Store
-}
-
 // podID is pod name and namespace
 type podID = k8s.ServiceID
 
@@ -65,7 +61,7 @@ type Manager struct {
 
 	svcCache svcCache
 
-	storeGetter StoreGetter
+	localPods agentK8s.LocalPodResource
 
 	warnOnce sync.Once
 
@@ -85,9 +81,10 @@ type Manager struct {
 	policyConfigs map[policyID]*LRPConfig
 }
 
-func NewRedirectPolicyManager(svc svcManager) *Manager {
+func NewRedirectPolicyManager(svc svcManager, lpr agentK8s.LocalPodResource) *Manager {
 	return &Manager{
 		svcManager:            svc,
+		localPods:             lpr,
 		policyFrontendsByHash: make(map[string]policyID),
 		policyServices:        make(map[k8s.ServiceID]policyID),
 		policyPods:            make(map[podID][]policyID),
@@ -97,10 +94,6 @@ func NewRedirectPolicyManager(svc svcManager) *Manager {
 
 func (rpm *Manager) RegisterSvcCache(cache svcCache) {
 	rpm.svcCache = cache
-}
-
-func (rpm *Manager) RegisterGetStores(sg StoreGetter) {
-	rpm.storeGetter = sg
 }
 
 // Event handlers
@@ -146,7 +139,10 @@ func (rpm *Manager) AddRedirectPolicy(config LRPConfig) (bool, error) {
 			logfields.LRPBackendPorts:          config.backendPorts,
 			logfields.LRPFrontendType:          config.frontendType,
 		}).Debug("Add local redirect policy")
-		pods := rpm.getLocalPodsForPolicy(&config)
+		pods, err := rpm.getLocalPodsForPolicy(&config)
+		if err != nil {
+			return false, err
+		}
 		if len(pods) == 0 {
 			return true, nil
 		}
@@ -164,7 +160,10 @@ func (rpm *Manager) AddRedirectPolicy(config LRPConfig) (bool, error) {
 			logfields.LRPFrontendType:          config.frontendType,
 		}).Debug("Add local redirect policy")
 
-		rpm.getAndUpsertPolicySvcConfig(&config)
+		err := rpm.getAndUpsertPolicySvcConfig(&config)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	return true, nil
@@ -343,7 +342,7 @@ type podMetadata struct {
 
 // getAndUpsertPolicySvcConfig gets service frontends for the given config service
 // and upserts the service frontends.
-func (rpm *Manager) getAndUpsertPolicySvcConfig(config *LRPConfig) {
+func (rpm *Manager) getAndUpsertPolicySvcConfig(config *LRPConfig) error {
 	switch config.frontendType {
 	case svcFrontendAll:
 		// Get all the service frontends.
@@ -366,7 +365,7 @@ func (rpm *Manager) getAndUpsertPolicySvcConfig(config *LRPConfig) {
 		ip := rpm.svcCache.GetServiceFrontendIP(*config.serviceID, lb.SVCTypeClusterIP)
 		if ip == nil {
 			// The LRP will be applied when the selected service is added later.
-			return
+			return nil
 		}
 		addrCluster := cmtypes.MustAddrClusterFromIP(ip)
 		config.frontendMappings[0].feAddr.AddrCluster = addrCluster
@@ -381,7 +380,7 @@ func (rpm *Manager) getAndUpsertPolicySvcConfig(config *LRPConfig) {
 		ip := rpm.svcCache.GetServiceFrontendIP(*config.serviceID, lb.SVCTypeClusterIP)
 		if ip == nil {
 			// The LRP will be applied when the selected service is added later.
-			return
+			return nil
 		}
 		addrCluster := cmtypes.MustAddrClusterFromIP(ip)
 		for _, feM := range config.frontendMappings {
@@ -390,10 +389,14 @@ func (rpm *Manager) getAndUpsertPolicySvcConfig(config *LRPConfig) {
 		}
 	}
 
-	pods := rpm.getLocalPodsForPolicy(config)
+	pods, err := rpm.getLocalPodsForPolicy(config)
+	if err != nil {
+		return err
+	}
 	if len(pods) > 0 {
 		rpm.processConfig(config, pods...)
 	}
+	return nil
 }
 
 // storePolicyConfig stores various state for the given policy config.
@@ -561,17 +564,20 @@ func (rpm *Manager) upsertService(config *LRPConfig, frontendMapping *feMapping)
 }
 
 // Returns a slice of endpoint pods metadata that are selected by the given policy config.
-func (rpm *Manager) getLocalPodsForPolicy(config *LRPConfig) []*podMetadata {
+func (rpm *Manager) getLocalPodsForPolicy(config *LRPConfig) ([]*podMetadata, error) {
 	var (
 		retPods []*podMetadata
 		podData *podMetadata
 		err     error
 	)
 
-	podStore := rpm.storeGetter.GetStore("pod")
-	for _, podItem := range podStore.List() {
-		pod, ok := podItem.(*slimcorev1.Pod)
-		if !ok || !config.checkNamespace(pod.GetNamespace()) {
+	podStore, err := rpm.localPods.Store(context.TODO())
+	if err != nil {
+		log.WithError(err).Error("failed to get reference to local pod store")
+		return nil, err
+	}
+	for _, pod := range podStore.List() {
+		if !config.checkNamespace(pod.GetNamespace()) {
 			continue
 		}
 		podIPs := k8sUtils.ValidIPs(pod.Status)
@@ -594,7 +600,7 @@ func (rpm *Manager) getLocalPodsForPolicy(config *LRPConfig) []*podMetadata {
 		retPods = append(retPods, podData)
 	}
 
-	return retPods
+	return retPods, nil
 }
 
 // isValidConfig validates the given policy config for duplicates.
@@ -822,13 +828,6 @@ func (rpm *Manager) getPodMetadata(pod *slimcorev1.Pod, podIPs []string) (*podMe
 		for _, port := range container.Ports {
 			if port.Name == "" {
 				continue
-			}
-			if _, err := u8proto.ParseProtocol(string(port.Protocol)); err != nil {
-				return nil, err
-			}
-			if port.ContainerPort < 1 || port.ContainerPort > 65535 {
-				return nil, fmt.Errorf("invalid container port %v",
-					port.ContainerPort)
 			}
 			namedPorts[port.Name] = lb.NewL4Addr(lb.L4Type(port.Protocol),
 				uint16(port.ContainerPort))

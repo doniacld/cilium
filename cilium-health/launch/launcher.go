@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"time"
 
 	healthApi "github.com/cilium/cilium/api/v1/health/server"
 	"github.com/cilium/cilium/api/v1/models"
@@ -21,6 +20,7 @@ import (
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/time"
 )
 
 // CiliumHealth launches and polls the cilium-health daemon
@@ -41,7 +41,7 @@ const (
 )
 
 // Launch starts the cilium-health server and returns a handle to obtain its status
-func Launch(spec *healthApi.Spec) (*CiliumHealth, error) {
+func Launch(spec *healthApi.Spec, initialized <-chan struct{}) (*CiliumHealth, error) {
 	var (
 		err error
 		ch  = &CiliumHealth{}
@@ -65,12 +65,15 @@ func Launch(spec *healthApi.Spec) (*CiliumHealth, error) {
 		return nil, fmt.Errorf("failed to instantiate cilium-health client: %s", err)
 	}
 
-	go ch.runServer()
+	go ch.runServer(initialized)
 
 	return ch, nil
 }
 
-func (ch *CiliumHealth) runServer() {
+func (ch *CiliumHealth) runServer(initialized <-chan struct{}) {
+	// Wait until the agent has initialized sufficiently
+	<-initialized
+
 	// Wait until Cilium API is available
 	for {
 		cli, err := ciliumPkg.NewDefaultClient()

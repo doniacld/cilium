@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go/middleware"
 	smithytime "github.com/aws/smithy-go/time"
@@ -17,9 +16,8 @@ import (
 )
 
 // Describes one or more of your VPN connections. For more information, see Amazon
-// Web Services Site-to-Site VPN
-// (https://docs.aws.amazon.com/vpn/latest/s2svpn/VPC_VPN.html) in the Amazon Web
-// Services Site-to-Site VPN User Guide.
+// Web Services Site-to-Site VPN (https://docs.aws.amazon.com/vpn/latest/s2svpn/VPC_VPN.html)
+// in the Amazon Web Services Site-to-Site VPN User Guide.
 func (c *Client) DescribeVpnConnections(ctx context.Context, params *DescribeVpnConnectionsInput, optFns ...func(*Options)) (*DescribeVpnConnectionsOutput, error) {
 	if params == nil {
 		params = &DescribeVpnConnectionsInput{}
@@ -40,53 +38,37 @@ type DescribeVpnConnectionsInput struct {
 
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	// One or more filters.
+	//   - customer-gateway-configuration - The configuration information for the
+	//   customer gateway.
+	//   - customer-gateway-id - The ID of a customer gateway associated with the VPN
+	//   connection.
+	//   - state - The state of the VPN connection ( pending | available | deleting |
+	//   deleted ).
+	//   - option.static-routes-only - Indicates whether the connection has static
+	//   routes only. Used for devices that do not support Border Gateway Protocol (BGP).
 	//
-	// * customer-gateway-configuration - The configuration
-	// information for the customer gateway.
-	//
-	// * customer-gateway-id - The ID of a
-	// customer gateway associated with the VPN connection.
-	//
-	// * state - The state of the
-	// VPN connection (pending | available | deleting | deleted).
-	//
-	// *
-	// option.static-routes-only - Indicates whether the connection has static routes
-	// only. Used for devices that do not support Border Gateway Protocol (BGP).
-	//
-	// *
-	// route.destination-cidr-block - The destination CIDR block. This corresponds to
-	// the subnet used in a customer data center.
-	//
-	// * bgp-asn - The BGP Autonomous
-	// System Number (ASN) associated with a BGP device.
-	//
-	// * tag: - The key/value
-	// combination of a tag assigned to the resource. Use the tag key in the filter
-	// name and the tag value as the filter value. For example, to find all resources
-	// that have a tag with the key Owner and the value TeamA, specify tag:Owner for
-	// the filter name and TeamA for the filter value.
-	//
-	// * tag-key - The key of a tag
-	// assigned to the resource. Use this filter to find all resources assigned a tag
-	// with a specific key, regardless of the tag value.
-	//
-	// * type - The type of VPN
-	// connection. Currently the only supported type is ipsec.1.
-	//
-	// * vpn-connection-id -
-	// The ID of the VPN connection.
-	//
-	// * vpn-gateway-id - The ID of a virtual private
-	// gateway associated with the VPN connection.
-	//
-	// * transit-gateway-id - The ID of a
-	// transit gateway associated with the VPN connection.
+	//   - route.destination-cidr-block - The destination CIDR block. This corresponds
+	//   to the subnet used in a customer data center.
+	//   - bgp-asn - The BGP Autonomous System Number (ASN) associated with a BGP
+	//   device.
+	//   - tag : - The key/value combination of a tag assigned to the resource. Use the
+	//   tag key in the filter name and the tag value as the filter value. For example,
+	//   to find all resources that have a tag with the key Owner and the value TeamA ,
+	//   specify tag:Owner for the filter name and TeamA for the filter value.
+	//   - tag-key - The key of a tag assigned to the resource. Use this filter to find
+	//   all resources assigned a tag with a specific key, regardless of the tag value.
+	//   - type - The type of VPN connection. Currently the only supported type is
+	//   ipsec.1 .
+	//   - vpn-connection-id - The ID of the VPN connection.
+	//   - vpn-gateway-id - The ID of a virtual private gateway associated with the VPN
+	//   connection.
+	//   - transit-gateway-id - The ID of a transit gateway associated with the VPN
+	//   connection.
 	Filters []types.Filter
 
 	// One or more VPN connection IDs. Default: Describes your VPN connections.
@@ -108,6 +90,9 @@ type DescribeVpnConnectionsOutput struct {
 }
 
 func (c *Client) addOperationDescribeVpnConnectionsMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeVpnConnections{}, middleware.After)
 	if err != nil {
 		return err
@@ -116,34 +101,38 @@ func (c *Client) addOperationDescribeVpnConnectionsMiddlewares(stack *middleware
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeVpnConnections"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -152,7 +141,13 @@ func (c *Client) addOperationDescribeVpnConnectionsMiddlewares(stack *middleware
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeVpnConnections(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -162,6 +157,9 @@ func (c *Client) addOperationDescribeVpnConnectionsMiddlewares(stack *middleware
 		return err
 	}
 	if err = addRequestResponseLogging(stack, options); err != nil {
+		return err
+	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
 	return nil
@@ -182,16 +180,26 @@ type VpnConnectionAvailableWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// VpnConnectionAvailableWaiter will use default minimum delay of 15 seconds. Note
 	// that MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, VpnConnectionAvailableWaiter will use default max delay of 120 seconds.
-	// Note that MaxDelay must resolve to value greater than or equal to the MinDelay.
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, VpnConnectionAvailableWaiter will use default max delay of 120
+	// seconds. Note that MaxDelay must resolve to value greater than or equal to the
+	// MinDelay.
 	MaxDelay time.Duration
 
 	// LogWaitAttempts is used to enable logging for waiter retry attempts
@@ -231,9 +239,9 @@ func NewVpnConnectionAvailableWaiter(client DescribeVpnConnectionsAPIClient, opt
 	}
 }
 
-// Wait calls the waiter function for VpnConnectionAvailable waiter. The maxWaitDur
-// is the maximum wait duration the waiter will wait. The maxWaitDur is required
-// and must be greater than zero.
+// Wait calls the waiter function for VpnConnectionAvailable waiter. The
+// maxWaitDur is the maximum wait duration the waiter will wait. The maxWaitDur is
+// required and must be greater than zero.
 func (w *VpnConnectionAvailableWaiter) Wait(ctx context.Context, params *DescribeVpnConnectionsInput, maxWaitDur time.Duration, optFns ...func(*VpnConnectionAvailableWaiterOptions)) error {
 	_, err := w.WaitForOutput(ctx, params, maxWaitDur, optFns...)
 	return err
@@ -282,6 +290,9 @@ func (w *VpnConnectionAvailableWaiter) WaitForOutput(ctx context.Context, params
 
 		out, err := w.client.DescribeVpnConnections(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -406,16 +417,26 @@ type VpnConnectionDeletedWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// VpnConnectionDeletedWaiter will use default minimum delay of 15 seconds. Note
 	// that MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, VpnConnectionDeletedWaiter will use default max delay of 120 seconds.
-	// Note that MaxDelay must resolve to value greater than or equal to the MinDelay.
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, VpnConnectionDeletedWaiter will use default max delay of 120
+	// seconds. Note that MaxDelay must resolve to value greater than or equal to the
+	// MinDelay.
 	MaxDelay time.Duration
 
 	// LogWaitAttempts is used to enable logging for waiter retry attempts
@@ -506,6 +527,9 @@ func (w *VpnConnectionDeletedWaiter) WaitForOutput(ctx context.Context, params *
 
 		out, err := w.client.DescribeVpnConnections(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -603,7 +627,6 @@ func newServiceMetadataMiddleware_opDescribeVpnConnections(region string) *awsmi
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeVpnConnections",
 	}
 }

@@ -4,7 +4,11 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
+
+	"github.com/cilium/ebpf"
+	"github.com/sirupsen/logrus"
 
 	"github.com/cilium/cilium/pkg/datapath/linux/utime"
 	"github.com/cilium/cilium/pkg/identity"
@@ -13,11 +17,13 @@ import (
 )
 
 type authMapWriter struct {
+	logger  logrus.FieldLogger
 	authMap authmap.Map
 }
 
-func newAuthMapWriter(authMap authmap.Map) *authMapWriter {
+func newAuthMapWriter(logger logrus.FieldLogger, authMap authmap.Map) *authMapWriter {
 	return &authMapWriter{
+		logger:  logger,
 		authMap: authMap,
 	}
 }
@@ -76,4 +82,30 @@ func (r *authMapWriter) Delete(key authKey) error {
 	}
 
 	return nil
+}
+
+func (r *authMapWriter) DeleteIf(predicate func(key authKey, info authInfo) bool) error {
+	all, err := r.All()
+	if err != nil {
+		return fmt.Errorf("failed to get all entries: %w", err)
+	}
+	for k, v := range all {
+		if predicate(k, v) {
+			if err := r.Delete(k); err != nil {
+				if errors.Is(err, ebpf.ErrKeyNotExist) {
+					r.logger.
+						WithField("key", k).
+						Debug("Failed to delete already deleted auth entry")
+					continue
+				}
+				return fmt.Errorf("failed to delete auth entry from map: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (r *authMapWriter) MaxEntries() uint32 {
+	return r.authMap.MaxEntries()
 }

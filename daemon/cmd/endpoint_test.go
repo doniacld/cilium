@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/cilium/api/v1/models"
 	apiEndpoint "github.com/cilium/cilium/api/v1/server/restapi/endpoint"
 	"github.com/cilium/cilium/pkg/checker"
+	"github.com/cilium/cilium/pkg/endpoint"
 	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/ipam"
@@ -23,7 +24,7 @@ import (
 )
 
 func getEPTemplate(c *C, d *Daemon) *models.EndpointChangeRequest {
-	ip4, ip6, err := d.ipam.AllocateNext("", "test", ipam.PoolDefault)
+	ip4, ip6, err := d.ipam.AllocateNext("", "test", ipam.PoolDefault())
 	c.Assert(err, Equals, nil)
 	c.Assert(ip4, Not(IsNil))
 	c.Assert(ip6, Not(IsNil))
@@ -34,6 +35,10 @@ func getEPTemplate(c *C, d *Daemon) *models.EndpointChangeRequest {
 		Addressing: &models.AddressPair{
 			IPV6: ip6.IP.String(),
 			IPV4: ip4.IP.String(),
+		},
+		Properties: map[string]interface{}{
+			endpoint.PropertySkipBPFRegeneration: true,
+			endpoint.PropertyFakeEndpoint:        true,
 		},
 	}
 }

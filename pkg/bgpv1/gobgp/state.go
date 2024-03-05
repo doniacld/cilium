@@ -6,10 +6,11 @@ package gobgp
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/bgpv1/types"
+	v2alpha1api "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
+	"github.com/cilium/cilium/pkg/time"
 
 	gobgp "github.com/osrg/gobgp/v3/api"
 )
@@ -51,10 +52,15 @@ func (g *GoBGPServer) GetPeerState(ctx context.Context) (types.GetPeerStateRespo
 
 		peerState := &models.BgpPeer{}
 
+		if peer.Transport != nil {
+			peerState.PeerPort = int64(peer.Transport.RemotePort)
+		}
+
 		if peer.Conf != nil {
 			peerState.LocalAsn = int64(peer.Conf.LocalAsn)
 			peerState.PeerAddress = peer.Conf.NeighborAddress
 			peerState.PeerAsn = int64(peer.Conf.PeerAsn)
+			peerState.TCPPasswordEnabled = peer.Conf.AuthPassword != ""
 		}
 
 		if peer.State != nil {
@@ -63,7 +69,7 @@ func (g *GoBGPServer) GetPeerState(ctx context.Context) (types.GetPeerStateRespo
 			// Uptime is time since session got established.
 			// It is calculated by difference in time from uptime timestamp till now.
 			if peer.State.SessionState == gobgp.PeerState_ESTABLISHED && peer.Timers != nil && peer.Timers.State != nil {
-				peerState.UptimeNanoseconds = int64(time.Now().Sub(peer.Timers.State.Uptime.AsTime()))
+				peerState.UptimeNanoseconds = int64(time.Since(peer.Timers.State.Uptime.AsTime()))
 			}
 		}
 
@@ -72,6 +78,12 @@ func (g *GoBGPServer) GetPeerState(ctx context.Context) (types.GetPeerStateRespo
 				continue
 			}
 			peerState.Families = append(peerState.Families, toAgentAfiSafiState(afiSafi.State))
+		}
+
+		if peer.EbgpMultihop != nil && peer.EbgpMultihop.Enabled {
+			peerState.EbgpMultihopTTL = int64(peer.EbgpMultihop.MultihopTtl)
+		} else {
+			peerState.EbgpMultihopTTL = int64(v2alpha1api.DefaultBGPEBGPMultihopTTL) // defaults to 1 if not enabled
 		}
 
 		if peer.Timers != nil {
@@ -90,6 +102,12 @@ func (g *GoBGPServer) GetPeerState(ctx context.Context) (types.GetPeerStateRespo
 					peerState.AppliedKeepAliveTimeSeconds = int64(tState.KeepaliveInterval)
 				}
 			}
+		}
+
+		peerState.GracefulRestart = &models.BgpGracefulRestart{}
+		if peer.GracefulRestart != nil {
+			peerState.GracefulRestart.Enabled = peer.GracefulRestart.Enabled
+			peerState.GracefulRestart.RestartTimeSeconds = int64(peer.GracefulRestart.RestartTime)
 		}
 
 		data = append(data, peerState)
@@ -202,4 +220,109 @@ func toAgentSafi(s gobgp.Family_Safi) types.Safi {
 	default:
 		return types.SafiUnknown
 	}
+}
+
+func toGoBGPTableType(t types.TableType) (gobgp.TableType, error) {
+	switch t {
+	case types.TableTypeLocRIB:
+		return gobgp.TableType_LOCAL, nil
+	case types.TableTypeAdjRIBIn:
+		return gobgp.TableType_ADJ_IN, nil
+	case types.TableTypeAdjRIBOut:
+		return gobgp.TableType_ADJ_OUT, nil
+	default:
+		return gobgp.TableType_LOCAL, fmt.Errorf("unknown table type %d", t)
+	}
+}
+
+// GetRoutes retrieves routes from the RIB of underlying router
+func (g *GoBGPServer) GetRoutes(ctx context.Context, r *types.GetRoutesRequest) (*types.GetRoutesResponse, error) {
+	errs := []error{}
+	var routes []*types.Route
+
+	fn := func(destination *gobgp.Destination) {
+		paths, err := ToAgentPaths(destination.Paths)
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		routes = append(routes, &types.Route{
+			Prefix: destination.Prefix,
+			Paths:  paths,
+		})
+	}
+
+	tt, err := toGoBGPTableType(r.TableType)
+	if err != nil {
+		return nil, fmt.Errorf("invalid table type: %w", err)
+	}
+
+	family := &gobgp.Family{
+		Afi:  gobgp.Family_Afi(r.Family.Afi),
+		Safi: gobgp.Family_Safi(r.Family.Safi),
+	}
+
+	var neighbor string
+	if r.Neighbor.IsValid() {
+		neighbor = r.Neighbor.String()
+	}
+
+	req := &gobgp.ListPathRequest{
+		TableType: tt,
+		Family:    family,
+		Name:      neighbor,
+	}
+
+	if err := g.server.ListPath(ctx, req, fn); err != nil {
+		return nil, err
+	}
+
+	return &types.GetRoutesResponse{
+		Routes: routes,
+	}, nil
+}
+
+// GetRoutePolicies retrieves route policies from the underlying router
+func (g *GoBGPServer) GetRoutePolicies(ctx context.Context) (*types.GetRoutePoliciesResponse, error) {
+	// list defined sets into a map for later use
+	definedSets := make(map[string]*gobgp.DefinedSet)
+	err := g.server.ListDefinedSet(ctx, &gobgp.ListDefinedSetRequest{DefinedType: gobgp.DefinedType_NEIGHBOR}, func(ds *gobgp.DefinedSet) {
+		definedSets[ds.Name] = ds
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed listing neighbor defined sets: %w", err)
+	}
+	err = g.server.ListDefinedSet(ctx, &gobgp.ListDefinedSetRequest{DefinedType: gobgp.DefinedType_PREFIX}, func(ds *gobgp.DefinedSet) {
+		definedSets[ds.Name] = ds
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed listing prefix defined sets: %w", err)
+	}
+
+	// list policy assignments into a map for later use
+	assignments := make(map[string]*gobgp.PolicyAssignment)
+	err = g.server.ListPolicyAssignment(ctx, &gobgp.ListPolicyAssignmentRequest{}, func(a *gobgp.PolicyAssignment) {
+		for _, p := range a.Policies {
+			assignments[p.Name] = a
+		}
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed listing policy assignments: %w", err)
+	}
+
+	// list & convert policies
+	var policies []*types.RoutePolicy
+	err = g.server.ListPolicy(ctx, &gobgp.ListPolicyRequest{}, func(p *gobgp.Policy) {
+		// process only assigned policies
+		if assignment, exists := assignments[p.Name]; exists {
+			policies = append(policies, toAgentPolicy(p, definedSets, assignment))
+		}
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed listing route policies: %w", err)
+	}
+
+	return &types.GetRoutePoliciesResponse{
+		Policies: policies,
+	}, nil
 }

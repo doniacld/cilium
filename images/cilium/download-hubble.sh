@@ -9,13 +9,13 @@ set -o pipefail
 set -o nounset
 
 # renovate: datasource=github-release-attachments depName=cilium/hubble
-hubble_version="v0.11.5"
+hubble_version="v0.13.0"
 
 declare -A hubble_sha256
-# renovate: datasource=github-release-attachments depName=cilium/hubble digestVersion=v0.11.5
-hubble_sha256[amd64]="fe369ef1c474f918064603dda8d78fd8550b0f67661f219ae9167a13cd156b2a"
-# renovate: datasource=github-release-attachments depName=cilium/hubble digestVersion=v0.11.5
-hubble_sha256[arm64]="a02dcc2cccaadf795b69a6435f0169b1e1e52c7a8089c00a9f772fd37855873f"
+# renovate: datasource=github-release-attachments depName=cilium/hubble digestVersion=v0.13.0
+hubble_sha256[amd64]="33d06c144ab39b3966d815f9bf2474c331fc32b1ee52d1c2f559f0443dcdfc9a"
+# renovate: datasource=github-release-attachments depName=cilium/hubble digestVersion=v0.13.0
+hubble_sha256[arm64]="1c4a2d2acec14d3d1d52e51b1723608d7dfd54dc77d483be71e7774c9f870ec8"
 
 for arch in amd64 arm64 ; do
   curl --fail --show-error --silent --location "https://github.com/cilium/hubble/releases/download/${hubble_version}/hubble-linux-${arch}.tar.gz" --output "/tmp/hubble-${arch}.tgz"

@@ -272,6 +272,12 @@ func doFragmentedRequest(kubectl *helpers.Kubectl, srcPod string, srcPort, dstPo
 	ciliumPodK8s2, err := kubectl.GetCiliumPodOnNode(helpers.K8s2)
 	ExpectWithOffset(2, err).Should(BeNil(), "Cannot get cilium pod on k8s2")
 
+	res := kubectl.CiliumExecMustSucceed(context.TODO(), ciliumPodK8s1, "cilium config  get ConntrackAccounting")
+	res.ExpectContains("Enabled")
+
+	res = kubectl.CiliumExecMustSucceed(context.TODO(), ciliumPodK8s2, "cilium config  get ConntrackAccounting")
+	res.ExpectContains("Enabled")
+
 	_, dstPodIPK8s1 := kubectl.GetPodOnNodeLabeledWithOffset(helpers.K8s1, testDS, 1)
 	_, dstPodIPK8s2 := kubectl.GetPodOnNodeLabeledWithOffset(helpers.K8s2, testDS, 1)
 
@@ -281,13 +287,13 @@ func doFragmentedRequest(kubectl *helpers.Kubectl, srcPod string, srcPort, dstPo
 	// Atoi() throws an error and simply consider we have 0
 	// packets.
 
-	// Field #7 is "RxPackets=<n>"
-	cmdIn := "cilium bpf ct list global | awk '/%s/ { sub(\".*=\",\"\", $7); print $7 }'"
+	// Field #7 is "Packets=<n>"
+	cmdIn := "cilium-dbg bpf ct list global | awk '/%s/ { sub(\".*=\",\"\", $7); print $7 }'"
 
 	endpointK8s1 := net.JoinHostPort(dstPodIPK8s1, fmt.Sprintf("%d", dstPodPort))
 	patternInK8s1 := fmt.Sprintf("UDP IN [^:]+:%d -> %s", srcPort, endpointK8s1)
 	cmdInK8s1 := fmt.Sprintf(cmdIn, patternInK8s1)
-	res := kubectl.CiliumExecMustSucceed(context.TODO(), ciliumPodK8s1, cmdInK8s1)
+	res = kubectl.CiliumExecMustSucceed(context.TODO(), ciliumPodK8s1, cmdInK8s1)
 	countInK8s1, _ := strconv.Atoi(strings.TrimSpace(res.Stdout()))
 
 	endpointK8s2 := net.JoinHostPort(dstPodIPK8s2, fmt.Sprintf("%d", dstPodPort))
@@ -296,8 +302,8 @@ func doFragmentedRequest(kubectl *helpers.Kubectl, srcPod string, srcPort, dstPo
 	res = kubectl.CiliumExecMustSucceed(context.TODO(), ciliumPodK8s2, cmdInK8s2)
 	countInK8s2, _ := strconv.Atoi(strings.TrimSpace(res.Stdout()))
 
-	// Field #11 is "TxPackets=<n>"
-	cmdOut := "cilium bpf ct list global | awk '/%s/ { sub(\".*=\",\"\", $11); print $11 }'"
+	// Field #7 is "Packets=<n>"
+	cmdOut := "cilium-dbg bpf ct list global | awk '/%s/ { sub(\".*=\",\"\", $7); print $7 }'"
 
 	if !hasDNAT {
 		// If kube-proxy is enabled, we see packets in ctmap with the
@@ -686,7 +692,7 @@ func testNodePortExternal(kubectl *helpers.Kubectl, ni *helpers.NodesInfo, testS
 
 		// Clear CT tables on all Cilium nodes
 		kubectl.CiliumExecMustSucceedOnAll(context.TODO(),
-			"cilium bpf ct flush global", "Unable to flush CT maps")
+			"cilium-dbg bpf ct flush global", "Unable to flush CT maps")
 	}
 }
 
@@ -973,7 +979,7 @@ func testMaglev(kubectl *helpers.Kubectl, ni *helpers.NodesInfo) {
 	for _, label := range []string{helpers.K8s1, helpers.K8s2} {
 		pod, err := kubectl.GetCiliumPodOnNode(helpers.K8s1)
 		ExpectWithOffset(1, err).Should(BeNil(), "cannot get cilium pod name %s", label)
-		kubectl.CiliumExecMustSucceed(context.TODO(), pod, "cilium bpf ct flush global", "Unable to flush CT maps")
+		kubectl.CiliumExecMustSucceed(context.TODO(), pod, "cilium-dbg bpf ct flush global", "Unable to flush CT maps")
 	}
 
 	for _, port := range []int{60000, 61000, 62000} {
@@ -1021,10 +1027,10 @@ func testDSR(kubectl *helpers.Kubectl, ni *helpers.NodesInfo, k8s1IP string, k8s
 	url = getHTTPLink(k8s1IP, data.Spec.Ports[0].NodePort)
 
 	testCurlFromOutsideWithLocalPort(kubectl, ni, url, 1, true, sourcePortForCTGCtest)
-	res := kubectl.CiliumExecContext(context.TODO(), pod, fmt.Sprintf("cilium bpf nat list | grep %d", sourcePortForCTGCtest))
+	res := kubectl.CiliumExecContext(context.TODO(), pod, fmt.Sprintf("cilium-dbg bpf nat list | grep %d", sourcePortForCTGCtest))
 	ExpectWithOffset(1, res.Stdout()).ShouldNot(BeEmpty(), "NAT entry was not found")
 	// Flush CT maps to trigger eviction of the NAT entries (simulates CT GC)
-	_ = kubectl.CiliumExecMustSucceed(context.TODO(), pod, "cilium bpf ct flush global", "Unable to flush CT maps")
-	res = kubectl.CiliumExecContext(context.TODO(), pod, fmt.Sprintf("cilium bpf nat list | grep %d", sourcePortForCTGCtest))
+	_ = kubectl.CiliumExecMustSucceed(context.TODO(), pod, "cilium-dbg bpf ct flush global", "Unable to flush CT maps")
+	res = kubectl.CiliumExecContext(context.TODO(), pod, fmt.Sprintf("cilium-dbg bpf nat list | grep %d", sourcePortForCTGCtest))
 	res.ExpectFail("NAT entry was not evicted")
 }

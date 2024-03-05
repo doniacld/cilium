@@ -32,6 +32,11 @@ var (
 		RouterId:   dummies[instance1Link].ipv4.Addr().String(),
 		ListenPort: gobgpListenPort2,
 	}
+	gobgpGlobalIBGP = &gobgpapi.Global{
+		Asn:        ciliumASN, // iBGP
+		RouterId:   dummies[instance1Link].ipv4.Addr().String(),
+		ListenPort: gobgpListenPort,
+	}
 
 	gbgpNeighConf = &gobgpapi.Peer{
 		Conf: &gobgpapi.PeerConf{
@@ -81,6 +86,31 @@ var (
 			},
 		},
 	}
+	gbgpNeighConfPassword = &gobgpapi.Peer{
+		Conf: &gobgpapi.PeerConf{
+			NeighborAddress: dummies[ciliumLink].ipv4.Addr().String(),
+			PeerAsn:         ciliumASN,
+			AuthPassword:    "testing-123",
+		},
+		Transport: &gobgpapi.Transport{
+			RemoteAddress: dummies[ciliumLink].ipv4.Addr().String(),
+			RemotePort:    ciliumListenPort,
+			LocalAddress:  dummies[instance1Link].ipv4.Addr().String(),
+			PassiveMode:   false,
+		},
+		AfiSafis: []*gobgpapi.AfiSafi{
+			{
+				Config: &gobgpapi.AfiSafiConfig{
+					Family: gobgp.GoBGPIPv4Family,
+				},
+			},
+			{
+				Config: &gobgpapi.AfiSafiConfig{
+					Family: gobgp.GoBGPIPv6Family,
+				},
+			},
+		},
+	}
 
 	gobgpConf = gobgpConfig{
 		global: gobgpGlobal,
@@ -94,6 +124,18 @@ var (
 			gbgpNeighConf2,
 		},
 	}
+	gobgpConfPassword = gobgpConfig{
+		global: gobgpGlobal,
+		neighbors: []*gobgpapi.Peer{
+			gbgpNeighConfPassword,
+		},
+	}
+	gobgpConfIBGP = gobgpConfig{
+		global: gobgpGlobalIBGP,
+		neighbors: []*gobgpapi.Peer{
+			gbgpNeighConf,
+		},
+	}
 )
 
 // gobgpConfig used for starting gobgp instance
@@ -104,10 +146,11 @@ type gobgpConfig struct {
 
 // routeEvent contains information about new event in routing table of gobgp
 type routeEvent struct {
-	sourceASN   uint32
-	prefix      string
-	prefixLen   uint8
-	isWithdrawn bool
+	sourceASN           uint32
+	prefix              string
+	prefixLen           uint8
+	isWithdrawn         bool
+	extraPathAttributes []gobgpb.PathAttributeInterface // non-standard path attributes (other than Origin / ASPath / NextHop / MpReachNLRI)
 }
 
 // peerEvent contains information about peer state change of gobgp
@@ -133,7 +176,7 @@ func startGoBGP(ctx context.Context, conf gobgpConfig) (g *goBGP, err error) {
 	g = &goBGP{
 		context: ctx,
 		server: server.NewBgpServer(server.LoggerOption(gobgp.NewServerLogger(log, gobgp.LogParams{
-			AS:        gobgpASN,
+			AS:        conf.global.Asn,
 			Component: "tests.BGP",
 			SubSys:    "basic",
 		}))),
@@ -231,12 +274,19 @@ func (g *goBGP) readEvents() {
 					continue
 				}
 
+				pattrs, err := apiutil.UnmarshalPathAttributes(p.Pattrs)
+				if err != nil {
+					log.Errorf("failed to unmarshal path attributes %v: %v", p, err)
+					continue
+				}
+
 				select {
 				case g.routeNotif <- routeEvent{
-					sourceASN:   p.SourceAsn,
-					prefix:      prefix,
-					prefixLen:   length,
-					isWithdrawn: p.IsWithdraw,
+					sourceASN:           p.SourceAsn,
+					prefix:              prefix,
+					prefixLen:           length,
+					isWithdrawn:         p.IsWithdraw,
+					extraPathAttributes: g.filterStandardPathAttributes(pattrs),
 				}:
 				case <-g.context.Done():
 					return
@@ -295,4 +345,24 @@ func (g *goBGP) getRouteEvents(ctx context.Context, numExpectedEvents int) ([]ro
 	}
 
 	return receivedEvents, nil
+}
+
+// filterStandardPathAttributes filters standard path attributes (usually present on all routes) from the
+// provided list of the path attributes.
+func (g *goBGP) filterStandardPathAttributes(attrs []gobgpb.PathAttributeInterface) []gobgpb.PathAttributeInterface {
+	var res []gobgpb.PathAttributeInterface
+	for _, a := range attrs {
+		switch a.(type) {
+		case *gobgpb.PathAttributeOrigin:
+			continue
+		case *gobgpb.PathAttributeAsPath:
+			continue
+		case *gobgpb.PathAttributeNextHop:
+			continue
+		case *gobgpb.PathAttributeMpReachNLRI:
+			continue
+		}
+		res = append(res, a)
+	}
+	return res
 }

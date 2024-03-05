@@ -6,12 +6,12 @@ import (
 	"context"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
+// Delete an Amazon Web Services Verified Access group.
 func (c *Client) DeleteVerifiedAccessGroup(ctx context.Context, params *DeleteVerifiedAccessGroupInput, optFns ...func(*Options)) (*DeleteVerifiedAccessGroupOutput, error) {
 	if params == nil {
 		params = &DeleteVerifiedAccessGroupInput{}
@@ -29,17 +29,28 @@ func (c *Client) DeleteVerifiedAccessGroup(ctx context.Context, params *DeleteVe
 
 type DeleteVerifiedAccessGroupInput struct {
 
+	// The ID of the Verified Access group.
+	//
 	// This member is required.
 	VerifiedAccessGroupId *string
 
+	// A unique, case-sensitive token that you provide to ensure idempotency of your
+	// modification request. For more information, see Ensuring Idempotency (https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Run_Instance_Idempotency.html)
+	// .
 	ClientToken *string
 
+	// Checks whether you have the required permissions for the action, without
+	// actually making the request, and provides an error response. If you have the
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	noSmithyDocumentSerde
 }
 
 type DeleteVerifiedAccessGroupOutput struct {
+
+	// Details about the Verified Access group.
 	VerifiedAccessGroup *types.VerifiedAccessGroup
 
 	// Metadata pertaining to the operation's result.
@@ -49,6 +60,9 @@ type DeleteVerifiedAccessGroupOutput struct {
 }
 
 func (c *Client) addOperationDeleteVerifiedAccessGroupMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDeleteVerifiedAccessGroup{}, middleware.After)
 	if err != nil {
 		return err
@@ -57,40 +71,47 @@ func (c *Client) addOperationDeleteVerifiedAccessGroupMiddlewares(stack *middlew
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DeleteVerifiedAccessGroup"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
 		return err
 	}
 	if err = addIdempotencyToken_opDeleteVerifiedAccessGroupMiddleware(stack, options); err != nil {
@@ -102,6 +123,9 @@ func (c *Client) addOperationDeleteVerifiedAccessGroupMiddlewares(stack *middlew
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDeleteVerifiedAccessGroup(options.Region), middleware.Before); err != nil {
 		return err
 	}
+	if err = addRecursionDetection(stack); err != nil {
+		return err
+	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
 		return err
 	}
@@ -109,6 +133,9 @@ func (c *Client) addOperationDeleteVerifiedAccessGroupMiddlewares(stack *middlew
 		return err
 	}
 	if err = addRequestResponseLogging(stack, options); err != nil {
+		return err
+	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
 	return nil
@@ -151,7 +178,6 @@ func newServiceMetadataMiddleware_opDeleteVerifiedAccessGroup(region string) *aw
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DeleteVerifiedAccessGroup",
 	}
 }

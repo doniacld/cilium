@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go/middleware"
 	smithytime "github.com/aws/smithy-go/time"
@@ -56,6 +55,9 @@ type DescribeExportTasksOutput struct {
 }
 
 func (c *Client) addOperationDescribeExportTasksMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeExportTasks{}, middleware.After)
 	if err != nil {
 		return err
@@ -64,34 +66,38 @@ func (c *Client) addOperationDescribeExportTasksMiddlewares(stack *middleware.St
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeExportTasks"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -100,7 +106,13 @@ func (c *Client) addOperationDescribeExportTasksMiddlewares(stack *middleware.St
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeExportTasks(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -112,11 +124,14 @@ func (c *Client) addOperationDescribeExportTasksMiddlewares(stack *middleware.St
 	if err = addRequestResponseLogging(stack, options); err != nil {
 		return err
 	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
+		return err
+	}
 	return nil
 }
 
-// DescribeExportTasksAPIClient is a client that implements the DescribeExportTasks
-// operation.
+// DescribeExportTasksAPIClient is a client that implements the
+// DescribeExportTasks operation.
 type DescribeExportTasksAPIClient interface {
 	DescribeExportTasks(context.Context, *DescribeExportTasksInput, ...func(*Options)) (*DescribeExportTasksOutput, error)
 }
@@ -130,16 +145,26 @@ type ExportTaskCancelledWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// ExportTaskCancelledWaiter will use default minimum delay of 15 seconds. Note
 	// that MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, ExportTaskCancelledWaiter will use default max delay of 120 seconds.
-	// Note that MaxDelay must resolve to value greater than or equal to the MinDelay.
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, ExportTaskCancelledWaiter will use default max delay of 120
+	// seconds. Note that MaxDelay must resolve to value greater than or equal to the
+	// MinDelay.
 	MaxDelay time.Duration
 
 	// LogWaitAttempts is used to enable logging for waiter retry attempts
@@ -179,9 +204,9 @@ func NewExportTaskCancelledWaiter(client DescribeExportTasksAPIClient, optFns ..
 	}
 }
 
-// Wait calls the waiter function for ExportTaskCancelled waiter. The maxWaitDur is
-// the maximum wait duration the waiter will wait. The maxWaitDur is required and
-// must be greater than zero.
+// Wait calls the waiter function for ExportTaskCancelled waiter. The maxWaitDur
+// is the maximum wait duration the waiter will wait. The maxWaitDur is required
+// and must be greater than zero.
 func (w *ExportTaskCancelledWaiter) Wait(ctx context.Context, params *DescribeExportTasksInput, maxWaitDur time.Duration, optFns ...func(*ExportTaskCancelledWaiterOptions)) error {
 	_, err := w.WaitForOutput(ctx, params, maxWaitDur, optFns...)
 	return err
@@ -230,6 +255,9 @@ func (w *ExportTaskCancelledWaiter) WaitForOutput(ctx context.Context, params *D
 
 		out, err := w.client.DescribeExportTasks(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -306,16 +334,26 @@ type ExportTaskCompletedWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// ExportTaskCompletedWaiter will use default minimum delay of 15 seconds. Note
 	// that MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, ExportTaskCompletedWaiter will use default max delay of 120 seconds.
-	// Note that MaxDelay must resolve to value greater than or equal to the MinDelay.
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, ExportTaskCompletedWaiter will use default max delay of 120
+	// seconds. Note that MaxDelay must resolve to value greater than or equal to the
+	// MinDelay.
 	MaxDelay time.Duration
 
 	// LogWaitAttempts is used to enable logging for waiter retry attempts
@@ -355,9 +393,9 @@ func NewExportTaskCompletedWaiter(client DescribeExportTasksAPIClient, optFns ..
 	}
 }
 
-// Wait calls the waiter function for ExportTaskCompleted waiter. The maxWaitDur is
-// the maximum wait duration the waiter will wait. The maxWaitDur is required and
-// must be greater than zero.
+// Wait calls the waiter function for ExportTaskCompleted waiter. The maxWaitDur
+// is the maximum wait duration the waiter will wait. The maxWaitDur is required
+// and must be greater than zero.
 func (w *ExportTaskCompletedWaiter) Wait(ctx context.Context, params *DescribeExportTasksInput, maxWaitDur time.Duration, optFns ...func(*ExportTaskCompletedWaiterOptions)) error {
 	_, err := w.WaitForOutput(ctx, params, maxWaitDur, optFns...)
 	return err
@@ -406,6 +444,9 @@ func (w *ExportTaskCompletedWaiter) WaitForOutput(ctx context.Context, params *D
 
 		out, err := w.client.DescribeExportTasks(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -479,7 +520,6 @@ func newServiceMetadataMiddleware_opDescribeExportTasks(region string) *awsmiddl
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeExportTasks",
 	}
 }

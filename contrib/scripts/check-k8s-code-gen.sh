@@ -18,13 +18,18 @@ rm -rf ./pkg/k8s/slim/k8s/{client,apiextensions-client}
 # Generate all files
 make generate-k8s-api manifests
 
+# Ensure new files are also considered in the diff
+git add --intent-to-add .
+
 # Check for diff
 diff="$(git diff)"
+diff_staged="$(git diff --staged)"
 
-if [ -n "$diff" ]; then
+if [ -n "$diff" ] || [ -n "$diff_staged" ]; then
 	echo "Ungenerated source code:"
 	echo "$diff"
-	echo "Please run make generate-k8s-api & make manifests and submit your changes"
+	echo "$diff_staged"
+	echo "Please run 'make generate-k8s-api && make manifests' and submit your changes"
 	exit 1
 fi
 

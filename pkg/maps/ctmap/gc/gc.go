@@ -7,21 +7,24 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/endpoint"
+	"github.com/cilium/cilium/pkg/hive/cell"
 	"github.com/cilium/cilium/pkg/inctimer"
-	iputil "github.com/cilium/cilium/pkg/ip"
-	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/time"
 )
 
-var log = logging.DefaultLogger.WithField(logfields.LogSubsys, "ct-gc")
+type Enabler interface {
+	// Enable enables the connection tracking garbage collection.
+	Enable()
+}
 
 // EndpointManager is any type which returns the list of Endpoints which are
 // globally exposed on the current node.
@@ -29,29 +32,79 @@ type EndpointManager interface {
 	GetEndpoints() []*endpoint.Endpoint
 }
 
+type PerClusterCTMapsRetriever func() []*ctmap.Map
+
+type parameters struct {
+	cell.In
+
+	Lifecycle cell.Lifecycle
+	Logger    logrus.FieldLogger
+
+	DaemonConfig    *option.DaemonConfig
+	EndpointManager EndpointManager
+	Datapath        types.Datapath
+	SignalManager   SignalHandler
+
+	PerClusterCTMapsRetriever PerClusterCTMapsRetriever `optional:"true"`
+}
+
+type GC struct {
+	logger logrus.FieldLogger
+
+	ipv4 bool
+	ipv6 bool
+
+	endpointsManager EndpointManager
+	nodeAddressing   types.NodeAddressing
+	signalHandler    SignalHandler
+
+	perClusterCTMapsRetriever PerClusterCTMapsRetriever
+	controllerManager         *controller.Manager
+}
+
+func New(params parameters) *GC {
+	gc := &GC{
+		logger: params.Logger,
+
+		ipv4: params.DaemonConfig.EnableIPv4,
+		ipv6: params.DaemonConfig.EnableIPv6,
+
+		endpointsManager: params.EndpointManager,
+		nodeAddressing:   params.Datapath.LocalNodeAddressing(),
+		signalHandler:    params.SignalManager,
+
+		controllerManager: controller.NewManager(),
+	}
+	params.Lifecycle.Append(cell.Hook{
+		// OnStart not yet defined pending further modularization of CT map GC.
+		OnStop: func(cell.HookContext) error {
+			gc.controllerManager.RemoveAllAndWait()
+			return nil
+		},
+	})
+	return gc
+}
+
 // Enable enables the connection tracking garbage collection.
-// The restored endpoints and local node addresses are used to avoid GCing
-// connections that may still be in use: connections of active endpoints and,
-// in case the host firewall is enabled, connections of the local host.
-func Enable(ipv4, ipv6 bool, restoredEndpoints []*endpoint.Endpoint, mgr EndpointManager,
-	nodeAddressing types.NodeAddressing) {
+func (gc *GC) Enable() {
 	var (
 		initialScan         = true
 		initialScanComplete = make(chan struct{})
 	)
 
 	go func() {
-		ipv4Orig := ipv4
-		ipv6Orig := ipv6
+		ipv4 := gc.ipv4
+		ipv6 := gc.ipv6
 		triggeredBySignal := false
 		ctTimer, ctTimerDone := inctimer.New()
+		var gcPrev time.Time
 		defer ctTimerDone()
 		for {
 			var (
 				maxDeleteRatio float64
 
 				// epsMap contains an IP -> EP mapping. It is used by EmitCTEntryCB to
-				// avoid doing mgr.LookupIP, which is more expensive.
+				// avoid doing gc.endpointsManager.LookupIP, which is more expensive.
 				epsMap = make(map[netip.Addr]*endpoint.Endpoint)
 
 				// gcStart and emitEntryCB are used to populate DNSZombieMapping fields
@@ -82,22 +135,28 @@ func Enable(ipv4, ipv6 bool, restoredEndpoints []*endpoint.Endpoint, mgr Endpoin
 				}
 			)
 
-			eps := mgr.GetEndpoints()
+			gcInterval := gcStart.Sub(gcPrev)
+			if gcPrev.IsZero() {
+				gcInterval = time.Duration(0)
+			}
+			gcPrev = gcStart
+
+			eps := gc.endpointsManager.GetEndpoints()
 			for _, e := range eps {
 				epsMap[e.IPv4Address()] = e
 				epsMap[e.IPv6Address()] = e
 			}
 
 			if len(eps) > 0 || initialScan {
-				gcFilter := createGCFilter(initialScan, restoredEndpoints, emitEntryCB, nodeAddressing)
-				maxDeleteRatio = runGC(nil, ipv4, ipv6, triggeredBySignal, gcFilter)
+				gc.logger.Info("Starting initial GC of connection tracking")
+				maxDeleteRatio = gc.runGC(nil, ipv4, ipv6, triggeredBySignal, &ctmap.GCFilter{RemoveExpired: true, EmitCTEntryCB: emitEntryCB})
 			}
 			for _, e := range eps {
 				if !e.ConntrackLocal() {
 					// Skip because GC was handled above.
 					continue
 				}
-				runGC(e, ipv4, ipv6, triggeredBySignal, &ctmap.GCFilter{RemoveExpired: true, EmitCTEntryCB: emitEntryCB})
+				gc.runGC(e, ipv4, ipv6, triggeredBySignal, &ctmap.GCFilter{RemoveExpired: true, EmitCTEntryCB: emitEntryCB})
 			}
 
 			// Mark the CT GC as over in each EP DNSZombies instance
@@ -111,12 +170,12 @@ func Enable(ipv4, ipv6 bool, restoredEndpoints []*endpoint.Endpoint, mgr Endpoin
 			}
 
 			triggeredBySignal = false
-			unmuteSignals()
+			gc.signalHandler.UnmuteSignals()
 			select {
-			case x := <-wakeup:
+			case x := <-gc.signalHandler.Signals():
 				// mute before draining so that no more wakeups are queued just
 				// after we have drained
-				muteSignals()
+				gc.signalHandler.MuteSignals()
 				triggeredBySignal = true
 				ipv4 = false
 				ipv6 = false
@@ -126,28 +185,31 @@ func Enable(ipv4, ipv6 bool, restoredEndpoints []*endpoint.Endpoint, mgr Endpoin
 					ipv6 = true
 				}
 				// Drain current queue since we just woke up anyway.
-				for len(wakeup) > 0 {
-					x := <-wakeup
+				for len(gc.signalHandler.Signals()) > 0 {
+					x := <-gc.signalHandler.Signals()
 					if x == SignalProtoV4 {
 						ipv4 = true
 					} else if x == SignalProtoV6 {
 						ipv6 = true
 					}
 				}
-			case <-ctTimer.After(ctmap.GetInterval(maxDeleteRatio)):
-				muteSignals()
-				ipv4 = ipv4Orig
-				ipv6 = ipv6Orig
+			case <-ctTimer.After(ctmap.GetInterval(gcInterval, maxDeleteRatio)):
+				gc.signalHandler.MuteSignals()
+				ipv4 = gc.ipv4
+				ipv6 = gc.ipv6
 			}
 		}
 	}()
 
 	select {
 	case <-initialScanComplete:
-		log.Info("Initial scan of connection tracking completed")
+		gc.logger.Info("Initial scan of connection tracking completed")
 	case <-time.After(30 * time.Second):
-		log.Fatal("Timeout while waiting for initial conntrack scan")
+		gc.logger.Fatal("Timeout while waiting for initial conntrack scan")
 	}
+
+	// Not supporting BPF map pressure for local CT maps as of yet.
+	ctmap.CalculateCTMapPressure(gc.controllerManager, ctmap.GlobalMaps(gc.ipv4, gc.ipv6)...)
 }
 
 // runGC run CT's garbage collector for the given endpoint. `isLocal` refers if
@@ -158,34 +220,25 @@ func Enable(ipv4, ipv6 bool, restoredEndpoints []*endpoint.Endpoint, mgr Endpoin
 // The provided endpoint is optional; if it is provided, then its map will be
 // garbage collected and any failures will be logged to the endpoint log.
 // Otherwise it will garbage-collect the global map and use the global log.
-func runGC(e *endpoint.Endpoint, ipv4, ipv6, triggeredBySignal bool, filter *ctmap.GCFilter) (maxDeleteRatio float64) {
+func (gc *GC) runGC(e *endpoint.Endpoint, ipv4, ipv6, triggeredBySignal bool, filter *ctmap.GCFilter) (maxDeleteRatio float64) {
 	var maps []*ctmap.Map
 
 	if e == nil {
 		maps = ctmap.GlobalMaps(ipv4, ipv6)
 
-		// We treat per-cluster CT Maps as global map. When we don't enable
-		// cluster-aware addressing, ctmap.PerClusterCTMaps is nil (this is
-		// the default).
-		if ctmap.PerClusterCTMaps != nil {
-			perClusterMaps, err := ctmap.PerClusterCTMaps.GetAllClusterCTMaps()
-			if err != nil {
-				log.Error("Failed to get per-cluster CT maps. Continue without them.")
-			} else {
-				maps = append(maps, perClusterMaps...)
-			}
+		// We treat per-cluster CT Maps as global maps. When we don't enable
+		// cluster-aware addressing, perClusterCTMapsRetriever is nil (default).
+		if gc.perClusterCTMapsRetriever != nil {
+			maps = append(maps, gc.perClusterCTMapsRetriever()...)
 		}
 	} else {
 		maps = ctmap.LocalMaps(e, ipv4, ipv6)
 	}
 	for _, m := range maps {
-		path, err := m.Path()
-		if err == nil {
-			err = m.Open()
-		}
+		path, err := ctmap.OpenCTMap(m)
 		if err != nil {
 			msg := "Skipping CT garbage collection"
-			scopedLog := log.WithError(err).WithField(logfields.Path, path)
+			scopedLog := gc.logger.WithError(err).WithField(logfields.Path, path)
 			if os.IsNotExist(err) {
 				scopedLog.Debug(msg)
 			} else {
@@ -201,11 +254,11 @@ func runGC(e *endpoint.Endpoint, ipv4, ipv6, triggeredBySignal bool, filter *ctm
 		deleted := ctmap.GC(m, filter)
 
 		if deleted > 0 {
-			ratio := float64(deleted) / float64(m.MapInfo.MaxEntries)
+			ratio := float64(deleted) / float64(m.MaxEntries())
 			if ratio > maxDeleteRatio {
 				maxDeleteRatio = ratio
 			}
-			log.WithFields(logrus.Fields{
+			gc.logger.WithFields(logrus.Fields{
 				logfields.Path: path,
 				"count":        deleted,
 			}).Debug("Deleted filtered entries from map")
@@ -225,7 +278,7 @@ func runGC(e *endpoint.Endpoint, ipv4, ipv6, triggeredBySignal bool, filter *ctm
 			ctMapTCP, ctMapAny := ctmap.FilterMapsByProto(maps, vsn)
 			stats := ctmap.PurgeOrphanNATEntries(ctMapTCP, ctMapAny)
 			if stats != nil && (stats.EgressDeleted != 0 || stats.IngressDeleted != 0) {
-				log.WithFields(logrus.Fields{
+				gc.logger.WithFields(logrus.Fields{
 					"ingressDeleted": stats.IngressDeleted,
 					"egressDeleted":  stats.EgressDeleted,
 					"ingressAlive":   stats.IngressAlive,
@@ -239,53 +292,7 @@ func runGC(e *endpoint.Endpoint, ipv4, ipv6, triggeredBySignal bool, filter *ctm
 	return
 }
 
-func createGCFilter(initialScan bool, restoredEndpoints []*endpoint.Endpoint,
-	emitEntryCB ctmap.EmitCTEntryCBFunc, nodeAddressing types.NodeAddressing) *ctmap.GCFilter {
-	filter := &ctmap.GCFilter{
-		RemoveExpired: true,
-		EmitCTEntryCB: emitEntryCB,
-	}
+type fakeCTMapGC struct{}
 
-	// On the initial scan, scrub all IPs from the conntrack table which do
-	// not belong to IPs of any endpoint that has been restored. No new
-	// endpoints can appear yet so we can assume that any other entry not
-	// belonging to a restored endpoint has become stale.
-	if initialScan {
-		filter.ValidIPs = map[netip.Addr]struct{}{}
-		for _, ep := range restoredEndpoints {
-			if ep.IsHost() {
-				continue
-			}
-			if ep.IPv6.IsValid() {
-				filter.ValidIPs[ep.IPv6] = struct{}{}
-			}
-			if ep.IPv4.IsValid() {
-				filter.ValidIPs[ep.IPv4] = struct{}{}
-			}
-		}
-
-		// Once the host firewall is enabled, we will start tracking (and
-		// potentially enforcing policies) on all connections to and from the
-		// host IP addresses. Thus, we also need to avoid GCing the host IPs.
-		if option.Config.EnableHostFirewall {
-			addrs, err := nodeAddressing.IPv4().LocalAddresses()
-			if err != nil {
-				log.WithError(err).Warning("Unable to list local IPv4 addresses")
-			}
-			addrsV6, err := nodeAddressing.IPv6().LocalAddresses()
-			if err != nil {
-				log.WithError(err).Warning("Unable to list local IPv6 addresses")
-			}
-			addrs = append(addrs, addrsV6...)
-
-			for _, ip := range addrs {
-				if option.Config.IsExcludedLocalAddress(ip) {
-					continue
-				}
-				filter.ValidIPs[iputil.MustAddrFromIP(ip)] = struct{}{}
-			}
-		}
-	}
-
-	return filter
-}
+func NewFake() Enabler      { return fakeCTMapGC{} }
+func (fakeCTMapGC) Enable() {}

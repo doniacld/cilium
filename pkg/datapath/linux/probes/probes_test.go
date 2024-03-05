@@ -254,21 +254,21 @@ func TestWriteFeatureHeader(t *testing.T) {
 	}{
 		{
 			features: map[string]bool{
-				"HAVE_FIB_LOOKUP": true,
+				"HAVE_FEATURE_MACRO": true,
 			},
 			common: true,
 			expectedLines: []string{
-				"#define HAVE_FIB_LOOKUP 1",
+				"#define HAVE_FEATURE_MACRO 1",
 			},
 		},
 		{
 			features: map[string]bool{
-				"HAVE_FIB_LOOKUP": true,
+				"HAVE_FEATURE_MACRO": true,
 			},
 			common: false,
 			expectedLines: []string{
 				"#include \"features.h\"",
-				"#define HAVE_FIB_LOOKUP 1",
+				"#define HAVE_FEATURE_MACRO 1",
 			},
 		},
 	}
@@ -313,8 +313,25 @@ func TestOuterSourceIPProbe(t *testing.T) {
 	}
 }
 
+func TestSKBAdjustRoomL2RoomMACSupportProbe(t *testing.T) {
+	testutils.PrivilegedTest(t)
+	testutils.SkipOnOldKernel(t, "5.2", "BPF_ADJ_ROOM_MAC mode support in bpf_skb_adjust_room")
+
+	if err := HaveSKBAdjustRoomL2RoomMACSupport(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIPv6Support(t *testing.T) {
 	if err := HaveIPv6Support(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHaveDeadCodeElimSupport(t *testing.T) {
+	testutils.PrivilegedTest(t)
+
+	if err := HaveDeadCodeElim(); err != nil {
 		t.Fatal(err)
 	}
 }

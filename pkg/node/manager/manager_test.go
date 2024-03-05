@@ -8,23 +8,32 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	check "github.com/cilium/checkmate"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/cilium/cilium/pkg/checker"
-	"github.com/cilium/cilium/pkg/datapath/fake"
+	fakeTypes "github.com/cilium/cilium/pkg/datapath/fake/types"
+	"github.com/cilium/cilium/pkg/datapath/iptables"
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
+	"github.com/cilium/cilium/pkg/hive/cell"
+	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/inctimer"
+	"github.com/cilium/cilium/pkg/ip"
 	"github.com/cilium/cilium/pkg/ipcache"
 	ipcacheTypes "github.com/cilium/cilium/pkg/ipcache/types"
 	"github.com/cilium/cilium/pkg/labels"
+	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/node/addressing"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
+	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/source"
+	testidentity "github.com/cilium/cilium/pkg/testutils/identity"
 )
 
 func Test(t *testing.T) {
@@ -34,29 +43,6 @@ func Test(t *testing.T) {
 type managerTestSuite struct{}
 
 var _ = check.Suite(&managerTestSuite{})
-
-type configMock struct {
-	Tunneling          bool
-	RemoteNodeIdentity bool
-	NodeEncryption     bool
-	Encryption         bool
-}
-
-func (c *configMock) TunnelingEnabled() bool {
-	return c.Tunneling
-}
-
-func (c *configMock) RemoteNodeIdentitiesEnabled() bool {
-	return c.RemoteNodeIdentity
-}
-
-func (c *configMock) NodeEncryptionEnabled() bool {
-	return c.NodeEncryption
-}
-
-func (c *configMock) EncryptionEnabled() bool {
-	return c.Encryption
-}
 
 type nodeEvent struct {
 	event  string
@@ -124,14 +110,68 @@ func (i *ipcacheMock) RemoveIdentityOverride(prefix netip.Prefix, identityLabels
 	i.Delete(prefix.String(), source.CustomResource)
 }
 
+type ipsetMock struct {
+	v4 []string
+	v6 []string
+}
+
+func newIPSetMock() *ipsetMock {
+	return &ipsetMock{}
+}
+
+func (i *ipsetMock) AddToNodeIpset(nodeIP net.IP) {
+	entry := nodeIP.String()
+	if ip.IsIPv6(nodeIP) {
+		if slices.Contains(i.v6, entry) {
+			return
+		}
+		i.v6 = append(i.v6, strings.ToLower(entry))
+	} else {
+		if slices.Contains(i.v4, entry) {
+			return
+		}
+		i.v4 = append(i.v4, entry)
+	}
+}
+
+func (i *ipsetMock) RemoveFromNodeIpset(nodeIP net.IP) {
+	entry := nodeIP.String()
+	if ip.IsIPv6(nodeIP) {
+		idx := slices.Index(i.v6, entry)
+		if idx != -1 {
+			i.v6 = slices.Delete(i.v6, idx, idx+1)
+		}
+	} else {
+		idx := slices.Index(i.v4, entry)
+		if idx != -1 {
+			i.v4 = slices.Delete(i.v4, idx, idx+1)
+		}
+	}
+}
+
+func ipsetContains(ipsetMgr *ipsetMock, setName string, nodeIP string) (bool, error) {
+	switch setName {
+	case iptables.CiliumNodeIpsetV4:
+		return slices.Index(ipsetMgr.v4, nodeIP) != -1, nil
+	case iptables.CiliumNodeIpsetV6:
+		return slices.Index(ipsetMgr.v6, nodeIP) != -1, nil
+	default:
+		return false, fmt.Errorf("unexpected ipset name %s", setName)
+	}
+}
+
 type signalNodeHandler struct {
 	EnableNodeAddEvent                    bool
 	NodeAddEvent                          chan nodeTypes.Node
+	NodeAddEventError                     error
 	NodeUpdateEvent                       chan nodeTypes.Node
+	NodeUpdateEventError                  error
 	EnableNodeUpdateEvent                 bool
 	NodeDeleteEvent                       chan nodeTypes.Node
+	NodeDeleteEventError                  error
 	EnableNodeDeleteEvent                 bool
 	NodeValidateImplementationEvent       chan nodeTypes.Node
+	NodeValidateImplementationEventError  error
 	EnableNodeValidateImplementationEvent bool
 }
 
@@ -144,32 +184,39 @@ func newSignalNodeHandler() *signalNodeHandler {
 	}
 }
 
+func (s *signalNodeHandler) Name() string {
+	return "manager_test:signalNodeHandler"
+}
+
 func (n *signalNodeHandler) NodeAdd(newNode nodeTypes.Node) error {
 	if n.EnableNodeAddEvent {
 		n.NodeAddEvent <- newNode
 	}
-	return nil
+	return n.NodeAddEventError
 }
 
 func (n *signalNodeHandler) NodeUpdate(oldNode, newNode nodeTypes.Node) error {
 	if n.EnableNodeUpdateEvent {
 		n.NodeUpdateEvent <- newNode
 	}
-	return nil
+	return n.NodeUpdateEventError
 }
 
 func (n *signalNodeHandler) NodeDelete(node nodeTypes.Node) error {
 	if n.EnableNodeDeleteEvent {
 		n.NodeDeleteEvent <- node
 	}
-	return nil
+	return n.NodeDeleteEventError
+}
+
+func (n *signalNodeHandler) AllNodeValidateImplementation() {
 }
 
 func (n *signalNodeHandler) NodeValidateImplementation(node nodeTypes.Node) error {
 	if n.EnableNodeValidateImplementationEvent {
 		n.NodeValidateImplementationEvent <- node
 	}
-	return nil
+	return n.NodeValidateImplementationEventError
 }
 
 func (n *signalNodeHandler) NodeConfigurationChanged(config datapath.LocalNodeConfiguration) error {
@@ -179,13 +226,21 @@ func (n *signalNodeHandler) NodeConfigurationChanged(config datapath.LocalNodeCo
 func (s *managerTestSuite) SetUpSuite(c *check.C) {
 }
 
+func (s *managerTestSuite) SetUpTest(c *check.C) {
+	node.SetTestLocalNodeStore()
+}
+
+func (s *managerTestSuite) TearDownTest(c *check.C) {
+	node.UnsetTestLocalNodeStore()
+}
+
 func (s *managerTestSuite) TestNodeLifecycle(c *check.C) {
 	dp := newSignalNodeHandler()
 	dp.EnableNodeAddEvent = true
 	dp.EnableNodeUpdateEvent = true
 	dp.EnableNodeDeleteEvent = true
 	ipcacheMock := newIPcacheMock()
-	mngr, err := New("test", &configMock{}, ipcacheMock)
+	mngr, err := New(&option.DaemonConfig{}, ipcacheMock, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
 	mngr.Subscribe(dp)
 	c.Assert(err, check.IsNil)
 
@@ -257,7 +312,7 @@ func (s *managerTestSuite) TestMultipleSources(c *check.C) {
 	dp.EnableNodeUpdateEvent = true
 	dp.EnableNodeDeleteEvent = true
 	ipcacheMock := newIPcacheMock()
-	mngr, err := New("test", &configMock{}, ipcacheMock)
+	mngr, err := New(&option.DaemonConfig{}, ipcacheMock, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
 	c.Assert(err, check.IsNil)
 	mngr.Subscribe(dp)
 	defer mngr.Stop(context.TODO())
@@ -338,8 +393,8 @@ func (s *managerTestSuite) TestMultipleSources(c *check.C) {
 
 func (s *managerTestSuite) BenchmarkUpdateAndDeleteCycle(c *check.C) {
 	ipcacheMock := newIPcacheMock()
-	dp := fake.NewNodeHandler()
-	mngr, err := New("test", &configMock{}, ipcacheMock)
+	dp := fakeTypes.NewNodeHandler()
+	mngr, err := New(&option.DaemonConfig{}, ipcacheMock, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
 	c.Assert(err, check.IsNil)
 	mngr.Subscribe(dp)
 	defer mngr.Stop(context.TODO())
@@ -359,8 +414,8 @@ func (s *managerTestSuite) BenchmarkUpdateAndDeleteCycle(c *check.C) {
 
 func (s *managerTestSuite) TestClusterSizeDependantInterval(c *check.C) {
 	ipcacheMock := newIPcacheMock()
-	dp := fake.NewNodeHandler()
-	mngr, err := New("test", &configMock{}, ipcacheMock)
+	dp := fakeTypes.NewNodeHandler()
+	mngr, err := New(&option.DaemonConfig{}, ipcacheMock, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
 	c.Assert(err, check.IsNil)
 	mngr.Subscribe(dp)
 	defer mngr.Stop(context.TODO())
@@ -392,7 +447,7 @@ func (s *managerTestSuite) TestBackgroundSync(c *check.C) {
 	signalNodeHandler := newSignalNodeHandler()
 	signalNodeHandler.EnableNodeValidateImplementationEvent = true
 	ipcacheMock := newIPcacheMock()
-	mngr, err := New("test", &configMock{}, ipcacheMock)
+	mngr, err := New(&option.DaemonConfig{}, ipcacheMock, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
 	mngr.Subscribe(signalNodeHandler)
 	c.Assert(err, check.IsNil)
 	defer mngr.Stop(context.TODO())
@@ -436,7 +491,7 @@ func (s *managerTestSuite) TestBackgroundSync(c *check.C) {
 func (s *managerTestSuite) TestIpcache(c *check.C) {
 	ipcacheMock := newIPcacheMock()
 	dp := newSignalNodeHandler()
-	mngr, err := New("test", &configMock{}, ipcacheMock)
+	mngr, err := New(&option.DaemonConfig{}, ipcacheMock, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
 	c.Assert(err, check.IsNil)
 	mngr.Subscribe(dp)
 	defer mngr.Stop(context.TODO())
@@ -484,7 +539,7 @@ func (s *managerTestSuite) TestIpcache(c *check.C) {
 func (s *managerTestSuite) TestIpcacheHealthIP(c *check.C) {
 	ipcacheMock := newIPcacheMock()
 	dp := newSignalNodeHandler()
-	mngr, err := New("test", &configMock{}, ipcacheMock)
+	mngr, err := New(&option.DaemonConfig{}, ipcacheMock, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
 	c.Assert(err, check.IsNil)
 	mngr.Subscribe(dp)
 	defer mngr.Stop(context.TODO())
@@ -560,7 +615,7 @@ func (s *managerTestSuite) TestIpcacheHealthIP(c *check.C) {
 func (s *managerTestSuite) TestRemoteNodeIdentities(c *check.C) {
 	ipcacheMock := newIPcacheMock()
 	dp := newSignalNodeHandler()
-	mngr, err := New("test", &configMock{RemoteNodeIdentity: true}, ipcacheMock)
+	mngr, err := New(&option.DaemonConfig{EnableRemoteNodeIdentity: true}, ipcacheMock, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
 	c.Assert(err, check.IsNil)
 	mngr.Subscribe(dp)
 	defer mngr.Stop(context.TODO())
@@ -636,7 +691,7 @@ func (s *managerTestSuite) TestRemoteNodeIdentities(c *check.C) {
 func (s *managerTestSuite) TestNodeEncryption(c *check.C) {
 	ipcacheMock := newIPcacheMock()
 	dp := newSignalNodeHandler()
-	mngr, err := New("test", &configMock{NodeEncryption: true, Encryption: true}, ipcacheMock)
+	mngr, err := New(&option.DaemonConfig{EncryptNode: true, EnableIPSec: true}, ipcacheMock, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
 	c.Assert(err, check.IsNil)
 	mngr.Subscribe(dp)
 	defer mngr.Stop(context.TODO())
@@ -731,7 +786,7 @@ func (s *managerTestSuite) TestNode(c *check.C) {
 	dp.EnableNodeAddEvent = true
 	dp.EnableNodeUpdateEvent = true
 	dp.EnableNodeDeleteEvent = true
-	mngr, err := New("test", &configMock{}, ipcacheMock)
+	mngr, err := New(&option.DaemonConfig{}, ipcacheMock, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
 	c.Assert(err, check.IsNil)
 	mngr.Subscribe(dp)
 	defer mngr.Stop(context.TODO())
@@ -819,4 +874,255 @@ func (s *managerTestSuite) TestNode(c *check.C) {
 	c.Assert(ok, check.Equals, true)
 	// Needs to be the same as n2
 	c.Assert(n, checker.DeepEquals, *n1V2)
+}
+
+func TestNodeManagerEmitStatus(t *testing.T) {
+	// Tests health reporting on node manager.
+	assert := assert.New(t)
+
+	baseBackgroundSyncInterval = 1 * time.Millisecond
+	hp := cell.NewHealthProvider()
+	m, err := New(&option.DaemonConfig{}, newIPcacheMock(), newIPSetMock(), NewNodeMetrics(), cell.TestScopeFromProvider(cell.FullModuleID{"test"}, hp))
+	assert.NoError(err)
+
+	m.nodes[nodeTypes.Identity{
+		Name:    "node1",
+		Cluster: "c1",
+	}] = &nodeEntry{node: nodeTypes.Node{Name: "node1", Cluster: "c1"}}
+	m.nodeHandlers = make(map[datapath.NodeHandler]struct{})
+	nh1 := newSignalNodeHandler()
+	nh1.EnableNodeValidateImplementationEvent = true
+	// By default this is a buffered channel, by making it a non-buffered
+	// channel we can sync up iterations of background sync.
+	nh1.NodeValidateImplementationEvent = make(chan nodeTypes.Node)
+	nh1.NodeValidateImplementationEventError = fmt.Errorf("test error")
+	m.nodeHandlers[nh1] = struct{}{}
+
+	update := make(chan cell.Update)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hp.Subscribe(ctx, func(u cell.Update) {
+		update <- u
+	}, func(err error) {})
+	done := make(chan struct{})
+	go func() {
+		<-nh1.NodeValidateImplementationEvent
+		u := <-update
+		assert.Equal(u.Level(), cell.StatusDegraded)
+		nh1.NodeValidateImplementationEventError = nil
+		<-nh1.NodeValidateImplementationEvent
+		u = <-update
+		assert.Equal(u.Level(), cell.StatusOK)
+		close(done)
+	}()
+	// Start the manager
+	assert.NoError(m.Start(context.Background()))
+	<-done
+}
+
+type mockUpdater struct{}
+
+func (m *mockUpdater) UpdateIdentities(_, _ cache.IdentityCache, _ *sync.WaitGroup) {}
+
+type mockTriggerer struct{}
+
+func (m *mockTriggerer) UpdatePolicyMaps(ctx context.Context, wg *sync.WaitGroup) *sync.WaitGroup {
+	return wg
+}
+
+func (s *managerTestSuite) TestNodeWithSameInternalIP(c *check.C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	allocator := testidentity.NewMockIdentityAllocator(nil)
+	ipcache := ipcache.NewIPCache(&ipcache.Configuration{
+		Context:           ctx,
+		IdentityAllocator: allocator,
+		PolicyHandler:     &mockUpdater{},
+		DatapathHandler:   &mockTriggerer{},
+	})
+	defer cancel()
+	dp := newSignalNodeHandler()
+	dp.EnableNodeAddEvent = true
+	dp.EnableNodeUpdateEvent = true
+	dp.EnableNodeDeleteEvent = true
+	mngr, err := New(&option.DaemonConfig{LocalRouterIPv4: "169.254.4.6"}, ipcache, newIPSetMock(), NewNodeMetrics(), cell.TestScope())
+	c.Assert(err, check.IsNil)
+	mngr.Subscribe(dp)
+	defer mngr.Stop(context.TODO())
+
+	n1 := nodeTypes.Node{
+		Name:    "node1",
+		Cluster: "c1",
+		IPAddresses: []nodeTypes.Address{
+			{
+				Type: addressing.NodeInternalIP,
+				IP:   net.ParseIP("10.128.0.40"),
+			},
+			{
+				Type: addressing.NodeExternalIP,
+				IP:   net.ParseIP("34.171.135.203"),
+			},
+			{
+				Type: addressing.NodeCiliumInternalIP,
+				IP:   net.ParseIP("169.254.4.6"),
+			},
+		},
+		Source: source.Local,
+	}
+	mngr.NodeUpdated(n1)
+
+	select {
+	case nodeEvent := <-dp.NodeAddEvent:
+		c.Assert(nodeEvent, checker.DeepEquals, n1)
+	case nodeEvent := <-dp.NodeUpdateEvent:
+		c.Errorf("Unexpected NodeUpdate() event %#v", nodeEvent)
+	case nodeEvent := <-dp.NodeDeleteEvent:
+		c.Errorf("Unexpected NodeDelete() event %#v", nodeEvent)
+	case <-time.After(3 * time.Second):
+		c.Errorf("timeout while waiting for NodeAdd() event for node1")
+	}
+
+	n2 := nodeTypes.Node{
+		Name:    "node2",
+		Cluster: "c1",
+		IPAddresses: []nodeTypes.Address{
+			{
+				Type: addressing.NodeInternalIP,
+				IP:   net.ParseIP("10.128.0.110"),
+			},
+			{
+				Type: addressing.NodeExternalIP,
+				IP:   net.ParseIP("34.170.71.139"),
+			},
+			{
+				Type: addressing.NodeCiliumInternalIP,
+				IP:   net.ParseIP("169.254.4.6"),
+			},
+		},
+		Source: source.CustomResource,
+	}
+	mngr.NodeUpdated(n2)
+
+	select {
+	case nodeEvent := <-dp.NodeAddEvent:
+		c.Assert(nodeEvent, checker.DeepEquals, n2)
+	case nodeEvent := <-dp.NodeUpdateEvent:
+		c.Errorf("Unexpected NodeUpdate() event %#v", nodeEvent)
+	case nodeEvent := <-dp.NodeDeleteEvent:
+		c.Errorf("Unexpected NodeDelete() event %#v", nodeEvent)
+	case <-time.After(3 * time.Second):
+		c.Errorf("timeout while waiting for NodeAdd() event for node1")
+	}
+}
+
+// TestNodeIpset tests that the ipset entries on the node are updated correctly
+// when a node is updated or removed.
+// It is inspired from TestNode() in manager_test.go.
+func (s *managerTestSuite) TestNodeIpset(c *check.C) {
+	ipsetExpect := func(ipsetMgr *ipsetMock, ip string, expected bool) {
+		setName := iptables.CiliumNodeIpsetV6
+		if v4 := net.ParseIP(ip).To4(); v4 != nil {
+			setName = iptables.CiliumNodeIpsetV4
+		}
+
+		found, err := ipsetContains(ipsetMgr, setName, strings.ToLower(ip))
+		c.Assert(err, check.IsNil)
+
+		if found && !expected {
+			c.Errorf("ipset %s contains IP %s but it should not", setName, ip)
+		}
+		if !found && expected {
+			c.Errorf("ipset %s does not contain expected IP %s", setName, ip)
+		}
+	}
+
+	dp := newSignalNodeHandler()
+	dp.EnableNodeAddEvent = true
+	dp.EnableNodeUpdateEvent = true
+	dp.EnableNodeDeleteEvent = true
+	mngr, err := New(&option.DaemonConfig{
+		RoutingMode:          option.RoutingModeNative,
+		EnableIPv4Masquerade: true,
+	}, newIPcacheMock(), newIPSetMock(), NewNodeMetrics(), cell.TestScope())
+	mngr.Subscribe(dp)
+	c.Assert(err, check.IsNil)
+	defer mngr.Stop(context.TODO())
+
+	n1 := nodeTypes.Node{
+		Name:    "node1",
+		Cluster: "c1",
+		IPAddresses: []nodeTypes.Address{
+			{
+				Type: addressing.NodeCiliumInternalIP,
+				IP:   net.ParseIP("192.0.2.1"),
+			},
+			{
+				Type: addressing.NodeCiliumInternalIP,
+				IP:   net.ParseIP("2001:DB8::1"),
+			},
+			{
+				Type: addressing.NodeInternalIP,
+				IP:   net.ParseIP("10.0.0.1"),
+			},
+			{
+				Type: addressing.NodeInternalIP,
+				IP:   net.ParseIP("2001:ABCD::1"),
+			},
+		},
+		IPv4HealthIP: net.ParseIP("192.0.2.2"),
+		IPv6HealthIP: net.ParseIP("2001:DB8::2"),
+		Source:       source.KVStore,
+	}
+	mngr.NodeUpdated(n1)
+
+	select {
+	case nodeEvent := <-dp.NodeAddEvent:
+		c.Assert(nodeEvent, checker.DeepEquals, n1)
+	case nodeEvent := <-dp.NodeUpdateEvent:
+		c.Errorf("Unexpected NodeUpdate() event %#v", nodeEvent)
+	case nodeEvent := <-dp.NodeDeleteEvent:
+		c.Errorf("Unexpected NodeDelete() event %#v", nodeEvent)
+	case <-time.After(3 * time.Second):
+		c.Errorf("timeout while waiting for NodeAdd() event")
+	}
+
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "192.0.2.1", false)
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "2001:DB8::1", false)
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "10.0.0.1", true)
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "2001:ABCD::1", true)
+
+	n1.IPv4HealthIP = net.ParseIP("192.0.2.20")
+	mngr.NodeUpdated(n1)
+
+	select {
+	case nodeEvent := <-dp.NodeAddEvent:
+		c.Errorf("Unexpected NodeAdd() event %#v", nodeEvent)
+	case nodeEvent := <-dp.NodeUpdateEvent:
+		c.Assert(nodeEvent, checker.DeepEquals, n1)
+	case nodeEvent := <-dp.NodeDeleteEvent:
+		c.Errorf("Unexpected NodeDelete() event %#v", nodeEvent)
+	case <-time.After(3 * time.Second):
+		c.Errorf("timeout while waiting for NodeUpdate() event")
+	}
+
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "192.0.2.1", false)
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "2001:DB8::1", false)
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "10.0.0.1", true)
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "2001:ABCD::1", true)
+
+	mngr.NodeDeleted(n1)
+	select {
+	case nodeEvent := <-dp.NodeDeleteEvent:
+		c.Assert(nodeEvent, checker.DeepEquals, n1)
+	case nodeEvent := <-dp.NodeAddEvent:
+		c.Errorf("Unexpected NodeAdd() event %#v", nodeEvent)
+	case nodeEvent := <-dp.NodeUpdateEvent:
+		c.Errorf("Unexpected NodeUpdate() event %#v", nodeEvent)
+	case <-time.After(3 * time.Second):
+		c.Errorf("timeout while waiting for NodeDelete() event")
+	}
+
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "192.0.2.1", false)
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "2001:DB8::1", false)
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "10.0.0.1", false)
+	ipsetExpect(mngr.ipsetMgr.(*ipsetMock), "2001:ABCD::1", false)
 }

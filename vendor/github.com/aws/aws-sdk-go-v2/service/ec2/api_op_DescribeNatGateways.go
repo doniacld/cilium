@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
@@ -38,42 +37,35 @@ type DescribeNatGatewaysInput struct {
 
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
-	// One or more filters.
-	//
-	// * nat-gateway-id - The ID of the NAT gateway.
-	//
-	// * state -
-	// The state of the NAT gateway (pending | failed | available | deleting |
-	// deleted).
-	//
-	// * subnet-id - The ID of the subnet in which the NAT gateway
-	// resides.
-	//
-	// * tag: - The key/value combination of a tag assigned to the resource.
-	// Use the tag key in the filter name and the tag value as the filter value. For
-	// example, to find all resources that have a tag with the key Owner and the value
-	// TeamA, specify tag:Owner for the filter name and TeamA for the filter value.
-	//
-	// *
-	// tag-key - The key of a tag assigned to the resource. Use this filter to find all
-	// resources assigned a tag with a specific key, regardless of the tag value.
-	//
-	// *
-	// vpc-id - The ID of the VPC in which the NAT gateway resides.
+	// The filters.
+	//   - nat-gateway-id - The ID of the NAT gateway.
+	//   - state - The state of the NAT gateway ( pending | failed | available |
+	//   deleting | deleted ).
+	//   - subnet-id - The ID of the subnet in which the NAT gateway resides.
+	//   - tag : - The key/value combination of a tag assigned to the resource. Use the
+	//   tag key in the filter name and the tag value as the filter value. For example,
+	//   to find all resources that have a tag with the key Owner and the value TeamA ,
+	//   specify tag:Owner for the filter name and TeamA for the filter value.
+	//   - tag-key - The key of a tag assigned to the resource. Use this filter to find
+	//   all resources assigned a tag with a specific key, regardless of the tag value.
+	//   - vpc-id - The ID of the VPC in which the NAT gateway resides.
 	Filter []types.Filter
 
-	// The maximum number of results to return with a single call. To retrieve the
-	// remaining results, make another call with the returned nextToken value.
+	// The maximum number of items to return for this request. To get the next page of
+	// items, make another request with the token returned in the output. For more
+	// information, see Pagination (https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Query-Requests.html#api-pagination)
+	// .
 	MaxResults *int32
 
-	// One or more NAT gateway IDs.
+	// The IDs of the NAT gateways.
 	NatGatewayIds []string
 
-	// The token for the next page of results.
+	// The token returned from a previous paginated request. Pagination continues from
+	// the end of the items returned by the previous request.
 	NextToken *string
 
 	noSmithyDocumentSerde
@@ -84,8 +76,8 @@ type DescribeNatGatewaysOutput struct {
 	// Information about the NAT gateways.
 	NatGateways []types.NatGateway
 
-	// The token to use to retrieve the next page of results. This value is null when
-	// there are no more results to return.
+	// The token to include in another request to get the next page of items. This
+	// value is null when there are no more items to return.
 	NextToken *string
 
 	// Metadata pertaining to the operation's result.
@@ -95,6 +87,9 @@ type DescribeNatGatewaysOutput struct {
 }
 
 func (c *Client) addOperationDescribeNatGatewaysMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeNatGateways{}, middleware.After)
 	if err != nil {
 		return err
@@ -103,34 +98,38 @@ func (c *Client) addOperationDescribeNatGatewaysMiddlewares(stack *middleware.St
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeNatGateways"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -139,7 +138,13 @@ func (c *Client) addOperationDescribeNatGatewaysMiddlewares(stack *middleware.St
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeNatGateways(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -151,11 +156,14 @@ func (c *Client) addOperationDescribeNatGatewaysMiddlewares(stack *middleware.St
 	if err = addRequestResponseLogging(stack, options); err != nil {
 		return err
 	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
+		return err
+	}
 	return nil
 }
 
-// DescribeNatGatewaysAPIClient is a client that implements the DescribeNatGateways
-// operation.
+// DescribeNatGatewaysAPIClient is a client that implements the
+// DescribeNatGateways operation.
 type DescribeNatGatewaysAPIClient interface {
 	DescribeNatGateways(context.Context, *DescribeNatGatewaysInput, ...func(*Options)) (*DescribeNatGatewaysOutput, error)
 }
@@ -165,8 +173,10 @@ var _ DescribeNatGatewaysAPIClient = (*Client)(nil)
 // DescribeNatGatewaysPaginatorOptions is the paginator options for
 // DescribeNatGateways
 type DescribeNatGatewaysPaginatorOptions struct {
-	// The maximum number of results to return with a single call. To retrieve the
-	// remaining results, make another call with the returned nextToken value.
+	// The maximum number of items to return for this request. To get the next page of
+	// items, make another request with the token returned in the output. For more
+	// information, see Pagination (https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Query-Requests.html#api-pagination)
+	// .
 	Limit int32
 
 	// Set to true if pagination should stop if the service returns a pagination token
@@ -253,16 +263,26 @@ type NatGatewayAvailableWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// NatGatewayAvailableWaiter will use default minimum delay of 15 seconds. Note
 	// that MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, NatGatewayAvailableWaiter will use default max delay of 120 seconds.
-	// Note that MaxDelay must resolve to value greater than or equal to the MinDelay.
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, NatGatewayAvailableWaiter will use default max delay of 120
+	// seconds. Note that MaxDelay must resolve to value greater than or equal to the
+	// MinDelay.
 	MaxDelay time.Duration
 
 	// LogWaitAttempts is used to enable logging for waiter retry attempts
@@ -302,9 +322,9 @@ func NewNatGatewayAvailableWaiter(client DescribeNatGatewaysAPIClient, optFns ..
 	}
 }
 
-// Wait calls the waiter function for NatGatewayAvailable waiter. The maxWaitDur is
-// the maximum wait duration the waiter will wait. The maxWaitDur is required and
-// must be greater than zero.
+// Wait calls the waiter function for NatGatewayAvailable waiter. The maxWaitDur
+// is the maximum wait duration the waiter will wait. The maxWaitDur is required
+// and must be greater than zero.
 func (w *NatGatewayAvailableWaiter) Wait(ctx context.Context, params *DescribeNatGatewaysInput, maxWaitDur time.Duration, optFns ...func(*NatGatewayAvailableWaiterOptions)) error {
 	_, err := w.WaitForOutput(ctx, params, maxWaitDur, optFns...)
 	return err
@@ -353,6 +373,9 @@ func (w *NatGatewayAvailableWaiter) WaitForOutput(ctx context.Context, params *D
 
 		out, err := w.client.DescribeNatGateways(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -512,16 +535,25 @@ type NatGatewayDeletedWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// NatGatewayDeletedWaiter will use default minimum delay of 15 seconds. Note that
 	// MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, NatGatewayDeletedWaiter will use default max delay of 120 seconds. Note
-	// that MaxDelay must resolve to value greater than or equal to the MinDelay.
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, NatGatewayDeletedWaiter will use default max delay of 120 seconds.
+	// Note that MaxDelay must resolve to value greater than or equal to the MinDelay.
 	MaxDelay time.Duration
 
 	// LogWaitAttempts is used to enable logging for waiter retry attempts
@@ -569,10 +601,10 @@ func (w *NatGatewayDeletedWaiter) Wait(ctx context.Context, params *DescribeNatG
 	return err
 }
 
-// WaitForOutput calls the waiter function for NatGatewayDeleted waiter and returns
-// the output of the successful operation. The maxWaitDur is the maximum wait
-// duration the waiter will wait. The maxWaitDur is required and must be greater
-// than zero.
+// WaitForOutput calls the waiter function for NatGatewayDeleted waiter and
+// returns the output of the successful operation. The maxWaitDur is the maximum
+// wait duration the waiter will wait. The maxWaitDur is required and must be
+// greater than zero.
 func (w *NatGatewayDeletedWaiter) WaitForOutput(ctx context.Context, params *DescribeNatGatewaysInput, maxWaitDur time.Duration, optFns ...func(*NatGatewayDeletedWaiterOptions)) (*DescribeNatGatewaysOutput, error) {
 	if maxWaitDur <= 0 {
 		return nil, fmt.Errorf("maximum wait time for waiter must be greater than zero")
@@ -612,6 +644,9 @@ func (w *NatGatewayDeletedWaiter) WaitForOutput(ctx context.Context, params *Des
 
 		out, err := w.client.DescribeNatGateways(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -697,7 +732,6 @@ func newServiceMetadataMiddleware_opDescribeNatGateways(region string) *awsmiddl
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeNatGateways",
 	}
 }

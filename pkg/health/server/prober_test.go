@@ -12,6 +12,7 @@ import (
 
 	check "github.com/cilium/checkmate"
 
+	ciliumModels "github.com/cilium/cilium/api/v1/health/models"
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/checker"
 )
@@ -146,7 +147,15 @@ func (s *HealthServerTestSuite) TestProbersetNodes(c *check.C) {
 		}},
 	}
 	c.Assert(sortNodes(nodes), checker.DeepEquals, sortNodes(expected))
-
+	// Set result of probing before updating the nodes.
+	// The result should not be deleted after node update.
+	if elem, ok := prober.results[ipString(node1.NodeElement.PrimaryAddress.IPV4.IP)]; ok {
+		elem.Icmp = &ciliumModels.ConnectivityStatus{
+			Status: "Some status",
+		}
+	} else {
+		c.Errorf("expected to find result element for node's ip %s", node1.NodeElement.PrimaryAddress.IPV4.IP)
+	}
 	// Update node 1. Node 2 should remain unaffected.
 	modifiedNodesOld := nodeMap{
 		ipString(node1.Name): node1,
@@ -163,6 +172,13 @@ func (s *HealthServerTestSuite) TestProbersetNodes(c *check.C) {
 		IP: node1HealthIP,
 	}}
 	c.Assert(sortNodes(nodes), checker.DeepEquals, sortNodes(expected))
+	if elem, ok := prober.results[ipString(node1.NodeElement.PrimaryAddress.IPV4.IP)]; !ok {
+		c.Errorf("expected to find result element for node's ip %s", node1.NodeElement.PrimaryAddress.IPV4.IP)
+	} else {
+		// Check that status was not removed when updating node
+		c.Assert(elem.Icmp, check.NotNil)
+		c.Assert(elem.Icmp.Status, checker.Equals, "Some status")
+	}
 
 	// Remove node 1. Again, Node 2 should remain.
 	removedNodes := nodeMap{
@@ -192,4 +208,29 @@ func (s *HealthServerTestSuite) TestProbersetNodes(c *check.C) {
 		}},
 	}
 	c.Assert(sortNodes(nodes3), checker.DeepEquals, sortNodes(expected3))
+
+	// node4 has a PrimaryAddress with IPV4 enabled but an empty IP address.
+	// It should not show up in the prober.
+	node4, _, node4HealthIP := makeHealthNodeNil(4, 4)
+	node4.PrimaryAddress = &models.NodeAddressing{
+		IPV4: &models.NodeAddressingElement{
+			IP:      "",
+			Enabled: true,
+		},
+		IPV6: &models.NodeAddressingElement{
+			Enabled: false,
+		},
+	}
+
+	newNodes4 := nodeMap{
+		ipString(node4.Name): node4,
+	}
+	prober4 := newProber(&Server{}, newNodes4)
+	nodes4 := prober4.getIPsByNode()
+	expected4 := map[string][]*net.IPAddr{
+		node4.Name: {{
+			IP: node4HealthIP,
+		}},
+	}
+	c.Assert(sortNodes(nodes4), checker.DeepEquals, sortNodes(expected4))
 }

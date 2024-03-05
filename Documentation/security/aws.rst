@@ -11,9 +11,9 @@ Locking Down External Access Using AWS Metadata
 ***********************************************
 
 This document serves as an introduction to using Cilium to enforce policies
-based on AWS instances metadata. It is a detailed walk-through of getting a
-single-node Cilium environment running on your machine. It is designed to take
-15-30 minutes with some experience running Kubernetes.
+based on AWS metadata. It provides a detailed walk-through of running a single-node
+Cilium environment on your machine. It is designed to take 15-30 minutes
+for users with some experience running Kubernetes.
 
 
 Setup Cilium
@@ -35,7 +35,7 @@ AWS Access keys and IAM role
 ------------------------------
 
 To create a new access token the `following guide can be used
-<https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html#cli-configure-quickstart-config>`_.
+<https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html>`_.
 These keys need to have certain permissions set:
 
 .. code-block:: javascript
@@ -155,12 +155,12 @@ Configure AWS Security Groups
 
 Cilium's AWS Metadata filtering capability enables explicit whitelisting
 of communication between a subset of pods (identified by Kubernetes labels)
-with a set of destination EC2 VMs (identified by membership in an AWS security group).
+with a set of destination EC2 ENIs (identified by membership in an AWS security group).
 
-In this example, the destination EC2 VMs are a member of a single AWS security
-group ('sg-0f2146100a88d03c3') and pods with label class=xwing should
-only be able to make connections outside the cluster to the destination
-VMs in that security group.
+In this example, the destination EC2 elastic network interfaces are attached to
+EC2 instances that are members of a single AWS security group ('sg-0f2146100a88d03c3').
+Pods with label ``class=xwing`` should only be able to make connections outside the
+cluster to the destination network interfaces in that security group.
 
 To enable this, the VMs acting as Kubernetes worker nodes must be able to
 send traffic to the destination VMs that are being accessed by pods.  One approach
@@ -236,8 +236,8 @@ Policy Language:
             securityGroupsIds:
             - 'sg-0f2146100a88d03c3'
 
-This policy allows traffic from pod *xwing* to any AWS instance that is in
-the security group with ID ``sg-0f2146100a88d03c3``.
+This policy allows traffic from pod *xwing* to any AWS elastic network interface
+in the security group with ID ``sg-0f2146100a88d03c3``.
 
 Validate that derived policy is in place
 ----------------------------------------
@@ -245,8 +245,8 @@ Validate that derived policy is in place
 Every time that a new policy with ToGroups rules is added, an equivalent policy
 (also called "derivative policy"), will be created. This policy will contain the
 set of CIDRs that correspond to the specification in ToGroups, e.g., the IPs of
-all instances that are part of a specified security group. The list of IPs will
-be updated periodically.
+all network interfaces that are part of a specified security group. The list of
+IPs is updated periodically.
 
 .. code-block:: shell-session
 
@@ -329,14 +329,13 @@ The derivative rule should contain the following information:
 - *status*: whether or not the policy is enforced yet, and when the policy was
   last updated.
 
-The Cilium Endpoint status for the *xwing* should have policy enforcement
+The endpoint status for the *xwing* should have policy enforcement
 enabled only for egress connectivity:
 
 .. code-block:: shell-session
 
-    $ kubectl get cep xwing
-    NAME    ENDPOINT ID   IDENTITY ID   POLICY ENFORCEMENT   ENDPOINT STATE   IPV4         IPV6
-    xwing   23453         63929         egress               ready            10.10.0.95   f00d::a0a:0:0:22cf
+    $ kubectl exec -q -it -n kube-system cilium-85vtg -- cilium-dbg endpoint get 23453 -o jsonpath='{$[0].status.policy.realized.policy-enabled}'
+    egress
 
 In this example, *xwing* pod can only connect to ``34.254.113.42/32`` and
 ``172.31.44.160/32`` and connectivity to other IP will be denied.

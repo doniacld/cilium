@@ -4,8 +4,8 @@ package ec2
 
 import (
 	"context"
+	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -24,9 +24,8 @@ import (
 // Marketplace first sells the lowest priced Reserved Instances to you, and
 // continues to sell available Reserved Instance listings to you until your demand
 // is met. You are charged based on the total price of all of the listings that you
-// purchase. For more information, see Reserved Instance Marketplace
-// (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ri-market-general.html) in
-// the Amazon EC2 User Guide.
+// purchase. For more information, see Reserved Instance Marketplace (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ri-market-general.html)
+// in the Amazon EC2 User Guide.
 func (c *Client) DescribeReservedInstancesListings(ctx context.Context, params *DescribeReservedInstancesListingsInput, optFns ...func(*Options)) (*DescribeReservedInstancesListingsOutput, error) {
 	if params == nil {
 		params = &DescribeReservedInstancesListingsInput{}
@@ -46,17 +45,11 @@ func (c *Client) DescribeReservedInstancesListings(ctx context.Context, params *
 type DescribeReservedInstancesListingsInput struct {
 
 	// One or more filters.
-	//
-	// * reserved-instances-id - The ID of the Reserved
-	// Instances.
-	//
-	// * reserved-instances-listing-id - The ID of the Reserved Instances
-	// listing.
-	//
-	// * status - The status of the Reserved Instance listing (pending |
-	// active | cancelled | closed).
-	//
-	// * status-message - The reason for the status.
+	//   - reserved-instances-id - The ID of the Reserved Instances.
+	//   - reserved-instances-listing-id - The ID of the Reserved Instances listing.
+	//   - status - The status of the Reserved Instance listing ( pending | active |
+	//   cancelled | closed ).
+	//   - status-message - The reason for the status.
 	Filters []types.Filter
 
 	// One or more Reserved Instance IDs.
@@ -81,6 +74,9 @@ type DescribeReservedInstancesListingsOutput struct {
 }
 
 func (c *Client) addOperationDescribeReservedInstancesListingsMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeReservedInstancesListings{}, middleware.After)
 	if err != nil {
 		return err
@@ -89,34 +85,38 @@ func (c *Client) addOperationDescribeReservedInstancesListingsMiddlewares(stack 
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeReservedInstancesListings"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -125,7 +125,13 @@ func (c *Client) addOperationDescribeReservedInstancesListingsMiddlewares(stack 
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeReservedInstancesListings(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -137,6 +143,9 @@ func (c *Client) addOperationDescribeReservedInstancesListingsMiddlewares(stack 
 	if err = addRequestResponseLogging(stack, options); err != nil {
 		return err
 	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -144,7 +153,6 @@ func newServiceMetadataMiddleware_opDescribeReservedInstancesListings(region str
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeReservedInstancesListings",
 	}
 }

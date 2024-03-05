@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/metrics"
 )
 
 type MapSpec = ciliumebpf.MapSpec
@@ -113,7 +114,7 @@ func (m *Map) OpenOrCreate() error {
 		PinPath: bpf.TCGlobalsPath(),
 	}
 
-	m.spec.Flags = m.spec.Flags | bpf.GetPreAllocateMapFlags(bpf.MapType(m.spec.Type))
+	m.spec.Flags |= bpf.GetPreAllocateMapFlags(m.spec.Type)
 
 	path := bpf.MapPath(m.spec.Name)
 
@@ -168,6 +169,7 @@ func (m *Map) OpenOrCreate() error {
 	m.path = path
 
 	registerMap(m)
+	metrics.UpdateMapCapacity(m.spec.Name, m.spec.MaxEntries)
 	return nil
 }
 

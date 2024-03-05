@@ -18,16 +18,10 @@ type hostScopeAllocator struct {
 }
 
 func newHostScopeAllocator(n *net.IPNet) Allocator {
-	cidrRange, err := ipallocator.NewCIDRRange(n)
-	if err != nil {
-		panic(err)
-	}
-	a := &hostScopeAllocator{
+	return &hostScopeAllocator{
 		allocCIDR: n,
-		allocator: cidrRange,
+		allocator: ipallocator.NewCIDRRange(n),
 	}
-
-	return a
 }
 
 func (h *hostScopeAllocator) Allocate(ip net.IP, owner string, pool Pool) (*AllocationResult, error) {
@@ -69,7 +63,7 @@ func (h *hostScopeAllocator) AllocateNextWithoutSyncUpstream(owner string, pool 
 	return &AllocationResult{IP: ip}, nil
 }
 
-func (h *hostScopeAllocator) Dump() (map[string]string, string) {
+func (h *hostScopeAllocator) Dump() (map[Pool]map[string]string, string) {
 	var origIP *big.Int
 	alloc := map[string]string{}
 	_, data, err := h.allocator.Snapshot()
@@ -92,7 +86,11 @@ func (h *hostScopeAllocator) Dump() (map[string]string, string) {
 	maxIPs := ip.CountIPsInCIDR(h.allocCIDR)
 	status := fmt.Sprintf("%d/%s allocated from %s", len(alloc), maxIPs.String(), h.allocCIDR.String())
 
-	return alloc, status
+	return map[Pool]map[string]string{PoolDefault(): alloc}, status
+}
+
+func (h *hostScopeAllocator) Capacity() uint64 {
+	return ip.CountIPsInCIDR(h.allocCIDR).Uint64()
 }
 
 // RestoreFinished marks the status of restoration as done

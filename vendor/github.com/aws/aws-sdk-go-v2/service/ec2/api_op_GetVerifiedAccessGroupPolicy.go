@@ -4,12 +4,13 @@ package ec2
 
 import (
 	"context"
+	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
+// Shows the contents of the Verified Access policy associated with the group.
 func (c *Client) GetVerifiedAccessGroupPolicy(ctx context.Context, params *GetVerifiedAccessGroupPolicyInput, optFns ...func(*Options)) (*GetVerifiedAccessGroupPolicyOutput, error) {
 	if params == nil {
 		params = &GetVerifiedAccessGroupPolicyInput{}
@@ -27,17 +28,26 @@ func (c *Client) GetVerifiedAccessGroupPolicy(ctx context.Context, params *GetVe
 
 type GetVerifiedAccessGroupPolicyInput struct {
 
+	// The ID of the Verified Access group.
+	//
 	// This member is required.
 	VerifiedAccessGroupId *string
 
+	// Checks whether you have the required permissions for the action, without
+	// actually making the request, and provides an error response. If you have the
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	noSmithyDocumentSerde
 }
 
 type GetVerifiedAccessGroupPolicyOutput struct {
+
+	// The Verified Access policy document.
 	PolicyDocument *string
 
+	// The status of the Verified Access policy.
 	PolicyEnabled *bool
 
 	// Metadata pertaining to the operation's result.
@@ -47,6 +57,9 @@ type GetVerifiedAccessGroupPolicyOutput struct {
 }
 
 func (c *Client) addOperationGetVerifiedAccessGroupPolicyMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpGetVerifiedAccessGroupPolicy{}, middleware.After)
 	if err != nil {
 		return err
@@ -55,34 +68,38 @@ func (c *Client) addOperationGetVerifiedAccessGroupPolicyMiddlewares(stack *midd
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "GetVerifiedAccessGroupPolicy"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -91,10 +108,16 @@ func (c *Client) addOperationGetVerifiedAccessGroupPolicyMiddlewares(stack *midd
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = addOpGetVerifiedAccessGroupPolicyValidationMiddleware(stack); err != nil {
 		return err
 	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opGetVerifiedAccessGroupPolicy(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -106,6 +129,9 @@ func (c *Client) addOperationGetVerifiedAccessGroupPolicyMiddlewares(stack *midd
 	if err = addRequestResponseLogging(stack, options); err != nil {
 		return err
 	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -113,7 +139,6 @@ func newServiceMetadataMiddleware_opGetVerifiedAccessGroupPolicy(region string) 
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "GetVerifiedAccessGroupPolicy",
 	}
 }

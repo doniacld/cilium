@@ -19,6 +19,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	operatorOption "github.com/cilium/cilium/operator/option"
+	"github.com/cilium/cilium/pkg/aws/ec2"
 	"github.com/cilium/cilium/pkg/aws/eni/limits"
 	eniTypes "github.com/cilium/cilium/pkg/aws/eni/types"
 	"github.com/cilium/cilium/pkg/defaults"
@@ -110,8 +111,6 @@ func (n *Node) PopulateStatusFields(k8sObj *v2.CiliumNode) {
 			}
 			return nil
 		})
-
-	return
 }
 
 // getLimits returns the interface and IP limits of this node
@@ -261,17 +260,13 @@ func (n *Node) PrepareIPAllocation(scopedLog *logrus.Entry) (a *ipam.AllocationA
 	return
 }
 
-// isSubnetAtCapacity parses error from AWS SDK to understand if the subnet is out of capacity either due to out of
-// prefixes or IPs
-func isSubnetAtCapacity(err error) bool {
+// isSubnetAtPrefixCapacity parses error from AWS SDK to understand if the subnet is out of capacity for /28 prefixes.
+func isSubnetAtPrefixCapacity(err error) bool {
 	var apiErr smithy.APIError
-	errorStr := "There aren't sufficient free Ipv4 addresses or prefixes"
 	if errors.As(err, &apiErr) {
-		// Unfortunately SDK v1 has better error handling than v2. AWS VPC CNI plugin still uses v1 and relies on error
-		// codes like PrivateIpAddressLimitExceeded.
-		// See https://github.com/aws/amazon-vpc-cni-k8s/blob/fd8bcf0be4b522d13fb69c18539921452e4dec80/pkg/awsutils/awsutils.go#L1477-L1487 for more details.
-		// Cilium uses v2 SDK, so we need to rely on string comparison until the SDK supports custom errors.
-		return apiErr.ErrorCode() == "InvalidParameterValue" && strings.Contains(apiErr.ErrorMessage(), errorStr)
+		return apiErr.ErrorCode() == ec2.InsufficientPrefixesInSubnetStr ||
+			(apiErr.ErrorCode() == ec2.InvalidParameterValueStr &&
+				strings.Contains(apiErr.ErrorMessage(), ec2.SubnetFullErrMsgStr))
 	}
 	return false
 }
@@ -286,7 +281,7 @@ func (n *Node) AllocateIPs(ctx context.Context, a *ipam.AllocationAction) error 
 	if isPrefixDelegated {
 		numPrefixes := ip.PrefixCeil(a.AvailableForAllocation, option.ENIPDBlockSizeIPv4)
 		err := n.manager.api.AssignENIPrefixes(ctx, a.InterfaceID, int32(numPrefixes))
-		if !isSubnetAtCapacity(err) {
+		if !isSubnetAtPrefixCapacity(err) {
 			return err
 		}
 		// Subnet might be out of available /28 prefixes, but /32 IP addresses might be available.
@@ -357,7 +352,8 @@ func (n *Node) errorInstanceNotRunning(err error) (notRunning bool) {
 func isAttachmentIndexConflict(err error) bool {
 	var apiErr smithy.APIError
 	if errors.As(err, &apiErr) {
-		return apiErr.ErrorCode() == "InvalidParameterValue" && strings.Contains(apiErr.ErrorMessage(), "interface attached at device")
+		return apiErr.ErrorCode() == ec2.InvalidParameterValueStr &&
+			strings.Contains(apiErr.ErrorMessage(), "interface attached at device")
 	}
 	return false
 }
@@ -459,7 +455,7 @@ func (n *Node) CreateInterface(ctx context.Context, allocation *ipam.AllocationA
 
 	eniID, eni, err := n.manager.api.CreateNetworkInterface(ctx, int32(toAllocate), subnet.ID, desc, securityGroupIDs, isPrefixDelegated)
 	if err != nil {
-		if isPrefixDelegated && isSubnetAtCapacity(err) {
+		if isPrefixDelegated && isSubnetAtPrefixCapacity(err) {
 			// Subnet might be out of available /28 prefixes, but /32 IP addresses might be available.
 			// We should attempt to allocate /32 IPs.
 			scopedLog.WithField(logfields.Node, n.k8sObj.Name).Warning("Subnet might be out of prefixes, Cilium will not allocate prefixes on this node anymore")

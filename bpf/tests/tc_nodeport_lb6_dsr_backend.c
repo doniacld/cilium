@@ -17,6 +17,7 @@
 #define ENABLE_HOST_ROUTING
 
 #define DISABLE_LOOPBACK_LB
+#define ENABLE_SKIP_FIB		1
 
 /* Skip ingress policy checks, not needed to validate hairpin flow */
 #define USE_BPF_PROG_FOR_INGRESS_POLICY
@@ -38,6 +39,9 @@ static volatile const __u8 *backend_mac = mac_four;
 #define SECCTX_FROM_IPCACHE 1
 
 #include "bpf_host.c"
+
+#include "lib/endpoint.h"
+#include "lib/ipcache.h"
 
 #define FROM_NETDEV	0
 #define TO_NETDEV	1
@@ -98,7 +102,7 @@ int nodeport_dsr_backend_pktgen(struct __ctx_buff *ctx)
 
 	opt->opt_type = DSR_IPV6_OPT_TYPE;
 	opt->opt_len = DSR_IPV6_OPT_LEN;
-	ipv6_addr_copy((union v6addr *)&opt->addr, &frontend_ip);
+	ipv6_addr_copy_unaligned((union v6addr *)&opt->addr, &frontend_ip);
 	opt->port = FRONTEND_PORT;
 
 	/* Push TCP header */
@@ -125,30 +129,13 @@ int nodeport_dsr_backend_setup(struct __ctx_buff *ctx)
 	union v6addr backend_ip = BACKEND_IP;
 
 	/* add local backend */
-	struct endpoint_info ep_value = {};
+	endpoint_v6_add_entry(&backend_ip, 0, 0, 0,
+			      (__u8 *)backend_mac, (__u8 *)node_mac);
 
-	memcpy(&ep_value.mac, (__u8 *)backend_mac, ETH_ALEN);
-	memcpy(&ep_value.node_mac, (__u8 *)node_mac, ETH_ALEN);
-
-	struct endpoint_key ep_key = {
-		.family = ENDPOINT_KEY_IPV6,
-	};
-	ipv6_addr_copy((union v6addr *)&ep_key.ip6, &backend_ip);
-	map_update_elem(&ENDPOINTS_MAP, &ep_key, &ep_value, BPF_ANY);
-
-	struct ipcache_key cache_key = {
-		.lpm_key.prefixlen = IPCACHE_PREFIX_LEN(128),
-		.family = ENDPOINT_KEY_IPV6,
-	};
-	ipv6_addr_copy((union v6addr *)&cache_key.ip6, &backend_ip);
-
-	struct remote_endpoint_info cache_value = {
-		.sec_identity = 112233,
-	};
-	map_update_elem(&IPCACHE_MAP, &cache_key, &cache_value, BPF_ANY);
+	ipcache_v6_add_entry(&backend_ip, 0, 112233, 0, 0);
 
 	/* Jump into the entrypoint */
-	tail_call_static(ctx, &entry_call_map, FROM_NETDEV);
+	tail_call_static(ctx, entry_call_map, FROM_NETDEV);
 	/* Fail if we didn't jump */
 	return TEST_ERROR;
 }
@@ -199,10 +186,10 @@ int nodeport_dsr_backend_check(struct __ctx_buff *ctx)
 	if (memcmp(l2->h_dest, (__u8 *)backend_mac, ETH_ALEN) != 0)
 		test_fatal("dst MAC is not the endpoint MAC")
 
-	if (ipv6_addrcmp((union v6addr *)&l3->saddr, &client_ip) != 0)
+	if (!ipv6_addr_equals((union v6addr *)&l3->saddr, &client_ip))
 		test_fatal("src IP has changed");
 
-	if (ipv6_addrcmp((union v6addr *)&l3->daddr, &backend_ip) != 0)
+	if (!ipv6_addr_equals((union v6addr *)&l3->daddr, &backend_ip))
 		test_fatal("dst IP has changed");
 
 	if (l3->nexthdr != NEXTHDR_DEST)
@@ -219,7 +206,7 @@ int nodeport_dsr_backend_check(struct __ctx_buff *ctx)
 
 	if (opt->port != FRONTEND_PORT)
 		test_fatal("port in DSR extension has changed")
-	if (ipv6_addrcmp((union v6addr *)&opt->addr, &frontend_ip) != 0)
+	if (!ipv6_addr_equals((union v6addr *)&opt->addr, &frontend_ip))
 		test_fatal("addr in DSR extension has changed")
 
 	if (l4->source != CLIENT_PORT)
@@ -242,8 +229,8 @@ int nodeport_dsr_backend_check(struct __ctx_buff *ctx)
 	ct_entry = map_lookup_elem(get_ct_map6(&tuple), &tuple);
 	if (!ct_entry)
 		test_fatal("no CT entry for DSR found");
-	if (!ct_entry->dsr)
-		test_fatal("CT entry doesn't have the .dsr flag set");
+	if (!ct_entry->dsr_internal)
+		test_fatal("CT entry doesn't have the .dsr_internal flag set");
 
 	struct ipv6_nat_entry *nat_entry;
 
@@ -253,7 +240,7 @@ int nodeport_dsr_backend_check(struct __ctx_buff *ctx)
 	nat_entry = snat_v6_lookup(&tuple);
 	if (!nat_entry)
 		test_fatal("no SNAT entry for DSR found");
-	if (ipv6_addrcmp((union v6addr *)&nat_entry->to_saddr, &frontend_ip) != 0)
+	if (!ipv6_addr_equals((union v6addr *)&nat_entry->to_saddr, &frontend_ip))
 		test_fatal("SNAT entry has wrong address");
 	if (nat_entry->to_sport != FRONTEND_PORT)
 		test_fatal("SNAT entry has wrong port");
@@ -261,41 +248,24 @@ int nodeport_dsr_backend_check(struct __ctx_buff *ctx)
 	test_finish();
 }
 
+static __always_inline
 int build_reply(struct __ctx_buff *ctx)
 {
 	union v6addr backend_ip = BACKEND_IP;
 	union v6addr client_ip = CLIENT_IP;
 	struct pktgen builder;
-	struct ipv6hdr *l3;
 	struct tcphdr *l4;
-	struct ethhdr *l2;
 	void *data;
 
 	/* Init packet builder */
 	pktgen__init(&builder, ctx);
 
-	/* Push ethernet header */
-	l2 = pktgen__push_ethhdr(&builder);
-	if (!l2)
-		return TEST_ERROR;
-
-	ethhdr__set_macs(l2, (__u8 *)node_mac, (__u8 *)client_mac);
-
-	/* Push IPv6 header */
-	l3 = pktgen__push_default_ipv6hdr(&builder);
-	if (!l3)
-		return TEST_ERROR;
-
-	ipv6_addr_copy((union v6addr *)&l3->saddr, &backend_ip);
-	ipv6_addr_copy((union v6addr *)&l3->daddr, &client_ip);
-
-	/* Push TCP header */
-	l4 = pktgen__push_default_tcphdr(&builder);
+	l4 = pktgen__push_ipv6_tcp_packet(&builder,
+					  (__u8 *)node_mac, (__u8 *)client_mac,
+					  (__u8 *)&backend_ip, (__u8 *)&client_ip,
+					  BACKEND_PORT, CLIENT_PORT);
 	if (!l4)
 		return TEST_ERROR;
-
-	l4->source = BACKEND_PORT;
-	l4->dest = CLIENT_PORT;
 
 	data = pktgen__push_data(&builder, default_data, sizeof(default_data));
 	if (!data)
@@ -307,6 +277,7 @@ int build_reply(struct __ctx_buff *ctx)
 	return 0;
 }
 
+static __always_inline
 int check_reply(const struct __ctx_buff *ctx)
 {
 	union v6addr frontend_ip = FRONTEND_IP;
@@ -346,10 +317,10 @@ int check_reply(const struct __ctx_buff *ctx)
 	if (memcmp(l2->h_dest, (__u8 *)client_mac, ETH_ALEN) != 0)
 		test_fatal("dst MAC is not the client MAC")
 
-	if (ipv6_addrcmp((union v6addr *)&l3->saddr, &frontend_ip) != 0)
+	if (!ipv6_addr_equals((union v6addr *)&l3->saddr, &frontend_ip))
 		test_fatal("src IP hasn't been RevNATed to frontend IP");
 
-	if (ipv6_addrcmp((union v6addr *)&l3->daddr, &client_ip) != 0)
+	if (!ipv6_addr_equals((union v6addr *)&l3->daddr, &client_ip))
 		test_fatal("dst IP has changed");
 
 	if (l4->source != FRONTEND_PORT)
@@ -374,7 +345,7 @@ SETUP("tc", "tc_nodeport_dsr_backend_reply")
 int nodeport_dsr_backend_reply_reply_setup(struct __ctx_buff *ctx)
 {
 	/* Jump into the entrypoint */
-	tail_call_static(ctx, &entry_call_map, TO_NETDEV);
+	tail_call_static(ctx, entry_call_map, TO_NETDEV);
 	/* Fail if we didn't jump */
 	return TEST_ERROR;
 }

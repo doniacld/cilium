@@ -7,7 +7,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 
-	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/hive/cell"
 	"github.com/cilium/cilium/pkg/k8s"
 	cilium_api_v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
@@ -15,6 +14,8 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/client"
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
+	slim_networkingv1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/networking/v1"
+	"github.com/cilium/cilium/pkg/k8s/types"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 )
 
@@ -28,9 +29,30 @@ var (
 		"k8s-resources",
 		"Agent Kubernetes resources",
 
+		cell.Config(k8s.DefaultConfig),
+		LocalNodeCell,
 		cell.Provide(
 			k8s.ServiceResource,
-			func(lc hive.Lifecycle, cs client.Clientset) (LocalNodeResource, error) {
+			k8s.EndpointsResource,
+			k8s.NamespaceResource,
+			k8s.NetworkPolicyResource,
+			k8s.CiliumNetworkPolicyResource,
+			k8s.CiliumClusterwideNetworkPolicyResource,
+			k8s.CiliumCIDRGroupResource,
+			k8s.CiliumNodeResource,
+			k8s.CiliumSlimEndpointResource,
+			k8s.CiliumEndpointSliceResource,
+			k8s.CiliumEnvoyConfigResource,
+			k8s.CiliumClusterwideEnvoyConfigResource,
+		),
+	)
+
+	LocalNodeCell = cell.Module(
+		"k8s-local-node-resources",
+		"Agent Kubernetes local node resources",
+
+		cell.Provide(
+			func(lc cell.Lifecycle, cs client.Clientset) (LocalNodeResource, error) {
 				return k8s.NodeResource(
 					lc, cs,
 					func(opts *metav1.ListOptions) {
@@ -38,7 +60,7 @@ var (
 					},
 				)
 			},
-			func(lc hive.Lifecycle, cs client.Clientset) (LocalCiliumNodeResource, error) {
+			func(lc cell.Lifecycle, cs client.Clientset) (LocalCiliumNodeResource, error) {
 				return k8s.CiliumNodeResource(
 					lc, cs,
 					func(opts *metav1.ListOptions) {
@@ -46,7 +68,7 @@ var (
 					},
 				)
 			},
-			func(lc hive.Lifecycle, cs client.Clientset) (LocalPodResource, error) {
+			func(lc cell.Lifecycle, cs client.Clientset) (LocalPodResource, error) {
 				return k8s.PodResource(
 					lc, cs,
 					func(opts *metav1.ListOptions) {
@@ -54,19 +76,15 @@ var (
 					},
 				)
 			},
-			k8s.NamespaceResource,
-			k8s.CiliumNetworkPolicyResource,
-			k8s.CiliumClusterwideNetworkPolicyResource,
-			k8s.CiliumCIDRGroupResource,
 		),
 	)
 )
 
-// LocalNodeResource is a resource.Resource[*corev1.Node] but one which will only stream updates for the node object
+// LocalNodeResource is a resource.Resource[*slim_corev1.Node] but one which will only stream updates for the node object
 // associated with the node we are currently running on.
 type LocalNodeResource resource.Resource[*slim_corev1.Node]
 
-// LocalCiliumNodeResource is a resource.Resource[*cilium_api_v2.Node] but one which will only stream updates for the
+// LocalCiliumNodeResource is a resource.Resource[*cilium_api_v2.CiliumNode] but one which will only stream updates for the
 // CiliumNode object associated with the node we are currently running on.
 type LocalCiliumNodeResource resource.Resource[*cilium_api_v2.CiliumNode]
 
@@ -79,11 +97,24 @@ type Resources struct {
 	cell.In
 
 	Services                         resource.Resource[*slim_corev1.Service]
+	Endpoints                        resource.Resource[*k8s.Endpoints]
 	LocalNode                        LocalNodeResource
 	LocalCiliumNode                  LocalCiliumNodeResource
 	LocalPods                        LocalPodResource
 	Namespaces                       resource.Resource[*slim_corev1.Namespace]
+	NetworkPolicies                  resource.Resource[*slim_networkingv1.NetworkPolicy]
 	CiliumNetworkPolicies            resource.Resource[*cilium_api_v2.CiliumNetworkPolicy]
 	CiliumClusterwideNetworkPolicies resource.Resource[*cilium_api_v2.CiliumClusterwideNetworkPolicy]
-	CIDRGroups                       resource.Resource[*cilium_api_v2alpha1.CiliumCIDRGroup]
+	CiliumCIDRGroups                 resource.Resource[*cilium_api_v2alpha1.CiliumCIDRGroup]
+	CiliumSlimEndpoint               resource.Resource[*types.CiliumEndpoint]
+	CiliumEndpointSlice              resource.Resource[*cilium_api_v2alpha1.CiliumEndpointSlice]
+	CiliumNode                       resource.Resource[*cilium_api_v2.CiliumNode]
+}
+
+// LocalNodeResources is a convenience struct to group CiliumNode and Node resources as cell constructor parameters.
+type LocalNodeResources struct {
+	cell.In
+
+	LocalNode       LocalNodeResource
+	LocalCiliumNode LocalCiliumNodeResource
 }

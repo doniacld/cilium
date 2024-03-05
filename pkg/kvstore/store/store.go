@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/time"
 )
 
 const (
@@ -33,6 +33,8 @@ var (
 	controllers controller.Manager
 
 	log = logging.DefaultLogger.WithField(logfields.LogSubsys, "shared-store")
+
+	kvstoreSyncControllerGroup = controller.NewGroup("kvstore-sync")
 )
 
 // KeyCreator is the function to create a new empty Key instances. Store
@@ -226,6 +228,7 @@ func JoinSharedStore(c Configuration) (*SharedStore, error) {
 
 	controllers.UpdateController(s.controllerName,
 		controller.ControllerParams{
+			Group: kvstoreSyncControllerGroup,
 			DoFunc: func(ctx context.Context) error {
 				return s.syncLocalKeys(ctx, true)
 			},
@@ -463,7 +466,7 @@ func (s *SharedStore) listAndStartWatcher() error {
 }
 
 func (s *SharedStore) watcher(listDone chan struct{}) {
-	s.kvstoreWatcher = s.backend.ListAndWatch(s.conf.Context, s.name+"-watcher", s.conf.Prefix, watcherChanSize)
+	s.kvstoreWatcher = s.backend.ListAndWatch(s.conf.Context, s.conf.Prefix, watcherChanSize)
 
 	for event := range s.kvstoreWatcher.Events {
 		if event.Typ == kvstore.EventTypeListDone {

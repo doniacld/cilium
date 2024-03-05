@@ -35,8 +35,14 @@ const (
 	// EventUUID is an event unique identifier
 	EventUUID = "eventID"
 
+	// CNIAttachmentID uniquely identifies an endpoint
+	CNIAttachmentID = "cniAttachmentID"
+
 	// ContainerID is the container identifier
 	ContainerID = "containerID"
+
+	// ContainerInterface is the name of the interface in the container namespace
+	ContainerInterface = "containerInterface"
 
 	// IdentityLabels are the labels relevant for the security identity
 	IdentityLabels = "identityLabels"
@@ -47,8 +53,8 @@ const (
 	// Labels are any label, they may not be relevant to the security identity.
 	Labels = "labels"
 
-	// Source is the label or node information source
-	Source = "source"
+	// SourceFilter is the label or node information source
+	SourceFilter = "sourceFilter"
 
 	// Controller is the name of the controller to log it.
 	Controller = "controller"
@@ -69,9 +75,24 @@ const (
 	// OldIdentity is a previously used security identity
 	OldIdentity = "oldIdentity"
 
+	// PolicyKey is a policy map key
+	PolicyKey = "policyKey"
+
+	// PolicyEntry is a policy map value
+	PolicyEntry = "policyEntry"
+
 	// PolicyRevision is the revision of the policy in the repository or of
 	// the object in question
 	PolicyRevision = "policyRevision"
+
+	// PolicyKeysAdded is a set of added policy map keys
+	PolicyKeysAdded = "policyKeysAdded"
+
+	// PolicyKeysDeleted is a set of deleted policy map keys
+	PolicyKeysDeleted = "policyKeysDeleted"
+
+	// PolicyEntriesOld is a set of old policy map keys and values
+	PolicyEntriesOld = "policyEntriesOld"
 
 	// DatapathPolicyRevision is the policy revision currently running in
 	// the datapath
@@ -120,6 +141,9 @@ const (
 
 	// NextHop is an IPV4 or IPv6 address for the next hop
 	NextHop = "nextHop"
+
+	// Address is an IPV4, IPv6 or FQDN address
+	Address = "address"
 
 	// IPAddr is an IPV4 or IPv6 address
 	IPAddr = "ipAddr"
@@ -211,7 +235,7 @@ const (
 	// NewCIDR is the new subnet/CIDR
 	NewCIDR = "newCIDR"
 
-	// IPAddrs is a lsit of IP addrs
+	// IPAddrs is a list of IP addrs
 	IPAddrs = "ipAddrs"
 
 	// MTU is the maximum transmission unit of one interface
@@ -329,9 +353,6 @@ const (
 	// BPFClockSource denotes the internal clock source (ktime vs jiffies)
 	BPFClockSource = "bpfClockSource"
 
-	// BPFInsnSet denotes the instruction set version
-	BPFInsnSet = "bpfInsnSet"
-
 	// CiliumLocalRedirectPolicyName is the name of a CiliumLocalRedirectPolicy
 	CiliumLocalRedirectName = "ciliumLocalRedirectPolicyName"
 
@@ -346,6 +367,9 @@ const (
 
 	// Listener is the name of an Envoy Listener defined in CEC or CCEC
 	Listener = "listener"
+
+	// ListenerPriority is the priority of an Envoy Listener defined in CEC or CCEC
+	ListenerPriority = "listenerPriority"
 
 	// BPFMapKey is a key from a BPF map
 	BPFMapKey = "bpfMapKey"
@@ -647,13 +671,14 @@ const (
 	// WorkQueueSyncBackoff is the backoff time used by workqueues before an attempt to retry sync with k8s-apiserver.
 	WorkQueueSyncBackOff = "workQueueSyncBackOff"
 
-	// CESSliceMode indicates the name of algorithm used to batch CEPs in a CES.
-	CESSliceMode = "ciliumEndpointSliceMode"
-
 	// SourceIP is a source IP
 	SourceIP = "sourceIP"
 
 	DestinationIP = "destinationIP"
+
+	LocalIP = "localIP"
+
+	RemoteIP = "remoteIP"
 
 	SourceCIDR = "sourceCIDR"
 
@@ -726,4 +751,7 @@ const (
 
 	// Value identifies a generic value (e.g., of a key/value pair).
 	Value = "value"
+
+	// State is the state of an individual component (apiserver, kvstore etc)
+	State = "state"
 )

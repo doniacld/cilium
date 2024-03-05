@@ -19,6 +19,16 @@ const (
 	httpProtocolOptionsType = "envoy.extensions.upstreams.http.v3.HttpProtocolOptions"
 )
 
+type HTTPVersionType int
+
+const (
+	HTTPVersionDownstream HTTPVersionType = -1
+	HTTPVersionAuto       HTTPVersionType = 0
+	HTTPVersion1          HTTPVersionType = 1
+	HTTPVersion2          HTTPVersionType = 2
+	HTTPVersion3          HTTPVersionType = 3
+)
+
 type ClusterMutator func(*envoy_config_cluster_v3.Cluster) *envoy_config_cluster_v3.Cluster
 
 // WithClusterLbPolicy sets the cluster's load balancing policy.
@@ -76,21 +86,42 @@ func WithIdleTimeout(seconds int) ClusterMutator {
 	}
 }
 
-// NewClusterWithDefaults same as NewHTTPCluster but has default mutation functions applied.
-func NewHTTPClusterWithDefaults(name string, mutationFunc ...ClusterMutator) (ciliumv2.XDSResource, error) {
-	fns := append(mutationFunc,
-		WithConnectionTimeout(5),
-		WithIdleTimeout(60),
-		WithClusterLbPolicy(int32(envoy_config_cluster_v3.Cluster_ROUND_ROBIN)),
-		WithOutlierDetection(true),
-	)
-	return NewHTTPCluster(name, fns...)
+func WithProtocol(protocolVersion HTTPVersionType) ClusterMutator {
+	return func(cluster *envoy_config_cluster_v3.Cluster) *envoy_config_cluster_v3.Cluster {
+		options := &envoy_upstreams_http_v3.HttpProtocolOptions{}
+		switch protocolVersion {
+		// Default protocol version in Envoy is HTTP1.1.
+		case HTTPVersion1, HTTPVersionAuto:
+			options.UpstreamProtocolOptions = &envoy_upstreams_http_v3.HttpProtocolOptions_ExplicitHttpConfig_{
+				ExplicitHttpConfig: &envoy_upstreams_http_v3.HttpProtocolOptions_ExplicitHttpConfig{
+					ProtocolConfig: &envoy_upstreams_http_v3.HttpProtocolOptions_ExplicitHttpConfig_HttpProtocolOptions{},
+				},
+			}
+		case HTTPVersion2:
+			options.UpstreamProtocolOptions = &envoy_upstreams_http_v3.HttpProtocolOptions_ExplicitHttpConfig_{
+				ExplicitHttpConfig: &envoy_upstreams_http_v3.HttpProtocolOptions_ExplicitHttpConfig{
+					ProtocolConfig: &envoy_upstreams_http_v3.HttpProtocolOptions_ExplicitHttpConfig_Http2ProtocolOptions{},
+				},
+			}
+		case HTTPVersion3:
+			options.UpstreamProtocolOptions = &envoy_upstreams_http_v3.HttpProtocolOptions_ExplicitHttpConfig_{
+				ExplicitHttpConfig: &envoy_upstreams_http_v3.HttpProtocolOptions_ExplicitHttpConfig{
+					ProtocolConfig: &envoy_upstreams_http_v3.HttpProtocolOptions_ExplicitHttpConfig_Http3ProtocolOptions{},
+				},
+			}
+		}
+
+		cluster.TypedExtensionProtocolOptions = map[string]*anypb.Any{
+			httpProtocolOptionsType: toAny(options),
+		}
+		return cluster
+	}
 }
 
 // NewHTTPCluster creates a new Envoy cluster.
-func NewHTTPCluster(name string, mutationFunc ...ClusterMutator) (ciliumv2.XDSResource, error) {
+func NewHTTPCluster(clusterName string, clusterServiceName string, mutationFunc ...ClusterMutator) (ciliumv2.XDSResource, error) {
 	cluster := &envoy_config_cluster_v3.Cluster{
-		Name: name,
+		Name: clusterName,
 		TypedExtensionProtocolOptions: map[string]*anypb.Any{
 			httpProtocolOptionsType: toAny(&envoy_upstreams_http_v3.HttpProtocolOptions{
 				UpstreamProtocolOptions: &envoy_upstreams_http_v3.HttpProtocolOptions_UseDownstreamProtocolConfig{
@@ -102,6 +133,9 @@ func NewHTTPCluster(name string, mutationFunc ...ClusterMutator) (ciliumv2.XDSRe
 		},
 		ClusterDiscoveryType: &envoy_config_cluster_v3.Cluster_Type{
 			Type: envoy_config_cluster_v3.Cluster_EDS,
+		},
+		EdsClusterConfig: &envoy_config_cluster_v3.Cluster_EdsClusterConfig{
+			ServiceName: clusterServiceName,
 		},
 	}
 
@@ -125,21 +159,24 @@ func NewHTTPCluster(name string, mutationFunc ...ClusterMutator) (ciliumv2.XDSRe
 
 // NewTCPClusterWithDefaults same as NewTCPCluster but has default mutation functions applied.
 // currently this is only used for TLSRoutes to create a passthrough proxy
-func NewTCPClusterWithDefaults(name string, mutationFunc ...ClusterMutator) (ciliumv2.XDSResource, error) {
+func NewTCPClusterWithDefaults(clusterName string, clusterServiceName string, mutationFunc ...ClusterMutator) (ciliumv2.XDSResource, error) {
 	fns := append(mutationFunc,
 		WithConnectionTimeout(5),
 		WithClusterLbPolicy(int32(envoy_config_cluster_v3.Cluster_ROUND_ROBIN)),
 		WithOutlierDetection(true),
 	)
-	return NewTCPCluster(name, fns...)
+	return NewTCPCluster(clusterName, clusterServiceName, fns...)
 }
 
 // NewTCPCluster creates a new Envoy cluster.
-func NewTCPCluster(name string, mutationFunc ...ClusterMutator) (ciliumv2.XDSResource, error) {
+func NewTCPCluster(clusterName string, clusterServiceName string, mutationFunc ...ClusterMutator) (ciliumv2.XDSResource, error) {
 	cluster := &envoy_config_cluster_v3.Cluster{
-		Name: name,
+		Name: clusterName,
 		ClusterDiscoveryType: &envoy_config_cluster_v3.Cluster_Type{
 			Type: envoy_config_cluster_v3.Cluster_EDS,
+		},
+		EdsClusterConfig: &envoy_config_cluster_v3.Cluster_EdsClusterConfig{
+			ServiceName: clusterServiceName,
 		},
 	}
 

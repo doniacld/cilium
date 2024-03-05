@@ -5,13 +5,13 @@
   },
   "staticResources": {
     "listeners": [
-      {{- if and .Values.proxy.prometheus.enabled .Values.envoy.prometheus.enabled }}
+      {{- if .Values.envoy.prometheus.enabled }}
       {
         "name": "envoy-prometheus-metrics-listener",
         "address": {
           "socket_address": {
             "address": "0.0.0.0",
-            "port_value": {{ .Values.proxy.prometheus.port | default .Values.envoy.prometheus.port }}
+            "port_value": {{ .Values.envoy.prometheus.port }}
           }
         },
         "filter_chains": [
@@ -36,7 +36,7 @@
                               "prefix": "/metrics"
                             },
                             "route": {
-                              "cluster": "envoy-admin",
+                              "cluster": "/envoy-admin",
                               "prefix_rewrite": "/stats/prometheus"
                             }
                           }
@@ -102,7 +102,7 @@
                               "prefix": "/healthz"
                             },
                             "route": {
-                              "cluster": "envoy-admin",
+                              "cluster": "/envoy-admin",
                               "prefix_rewrite": "/ready"
                             }
                           }
@@ -245,11 +245,11 @@
         }
       },
       {
-        "name": "envoy-admin",
+        "name": "/envoy-admin",
         "type": "STATIC",
         "connectTimeout": "{{ .Values.envoy.connectTimeoutSeconds }}s",
         "loadAssignment": {
-          "clusterName": "envoy-admin",
+          "clusterName": "/envoy-admin",
           "endpoints": [
             {
               "lbEndpoints": [
@@ -301,6 +301,14 @@
       "resourceApiVersion": "V3"
     }
   },
+  "bootstrapExtensions": [
+    {
+      "name": "envoy.bootstrap.internal_listener",
+      "typed_config": {
+        "@type": "type.googleapis.com/envoy.extensions.bootstrap.internal_listener.v3.InternalListener"
+      }
+    }
+  ],
   "layeredRuntime": {
     "layers": [
       {

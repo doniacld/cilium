@@ -67,7 +67,7 @@ decapsulate_overlay(struct __ctx_buff *ctx, __u32 *src_id)
 	if (proto != bpf_htons(ETH_P_IP))
 		return CTX_ACT_OK;
 
-	if (!revalidate_data(ctx, &data, &data_end, &ip4))
+	if (!revalidate_data_pull(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
 	if (ip4->protocol != IPPROTO_UDP)
 		return CTX_ACT_OK;
@@ -124,11 +124,12 @@ decapsulate_overlay(struct __ctx_buff *ctx, __u32 *src_id)
 		__throw_build_bug();
 	}
 
-	*src_id = bpf_ntohl(*src_id) >> 8;
+	*src_id = tunnel_vni_to_sec_identity(*src_id);
 	ctx_store_meta(ctx, CB_SRC_LABEL, *src_id);
 
 	if (ctx_adjust_hroom(ctx, -shrink, BPF_ADJ_ROOM_MAC, ctx_adjust_hroom_flags()))
 		return DROP_INVALID;
+
 	return ctx_redirect(ctx, ENCAP_IFINDEX, BPF_F_INGRESS);
 }
 #endif /* ENABLE_HIGH_SCALE_IPCACHE */

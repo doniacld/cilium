@@ -22,45 +22,65 @@ const (
 	ciliumIngressLabelKey = "cilium.io/ingress"
 )
 
-var _ translation.Translator = (*DedicatedIngressTranslator)(nil)
+var _ translation.Translator = (*dedicatedIngressTranslator)(nil)
 
-type DedicatedIngressTranslator struct {
-	secretsNamespace   string
-	enforceHTTPs       bool
-	idleTimeoutSeconds int
+type dedicatedIngressTranslator struct {
+	cecTranslator      translation.CECTranslator
+	hostNetworkEnabled bool
 }
 
-func NewDedicatedIngressTranslator(secretsNamespace string, enforceHTTPs bool, idleTimeoutSeconds int) *DedicatedIngressTranslator {
-	return &DedicatedIngressTranslator{
-		secretsNamespace:   secretsNamespace,
-		enforceHTTPs:       enforceHTTPs,
-		idleTimeoutSeconds: idleTimeoutSeconds,
+func NewDedicatedIngressTranslator(cecTranslator translation.CECTranslator, hostNetworkEnabled bool) *dedicatedIngressTranslator {
+	return &dedicatedIngressTranslator{
+		cecTranslator:      cecTranslator,
+		hostNetworkEnabled: hostNetworkEnabled,
 	}
 }
 
-func (d *DedicatedIngressTranslator) Translate(m *model.Model) (*ciliumv2.CiliumEnvoyConfig, *corev1.Service, *corev1.Endpoints, error) {
-	if m == nil || len(m.HTTP) == 0 || len(m.HTTP[0].Sources) == 0 {
+func (d *dedicatedIngressTranslator) Translate(m *model.Model) (*ciliumv2.CiliumEnvoyConfig, *corev1.Service, *corev1.Endpoints, error) {
+	if m == nil || (len(m.HTTP) == 0 && len(m.TLS) == 0) {
 		return nil, nil, nil, fmt.Errorf("model source can't be empty")
 	}
 
-	name := fmt.Sprintf("%s-%s", ciliumIngressPrefix, m.HTTP[0].Sources[0].Name)
-	namespace := m.HTTP[0].Sources[0].Namespace
+	var name string
+	var namespace string
+	var sourceResource model.FullyQualifiedResource
+	var modelService *model.Service
+	var cecName string
 
-	// The logic is same as what we have with default translator, but with a different model
+	if len(m.HTTP) == 0 {
+		name = fmt.Sprintf("%s-%s", ciliumIngressPrefix, m.TLS[0].Sources[0].Name)
+		namespace = m.TLS[0].Sources[0].Namespace
+		sourceResource = m.TLS[0].Sources[0]
+		modelService = m.TLS[0].Service
+		cecName = fmt.Sprintf("%s-%s-%s", ciliumIngressPrefix, namespace, m.TLS[0].Sources[0].Name)
+	} else {
+		name = fmt.Sprintf("%s-%s", ciliumIngressPrefix, m.HTTP[0].Sources[0].Name)
+		namespace = m.HTTP[0].Sources[0].Namespace
+		sourceResource = m.HTTP[0].Sources[0]
+		modelService = m.HTTP[0].Service
+		cecName = fmt.Sprintf("%s-%s-%s", ciliumIngressPrefix, namespace, m.HTTP[0].Sources[0].Name)
+	}
+
+	// The logic is same as what we have with default cecTranslator, but with a different model
 	// (i.e. the HTTP listeners are just belonged to one Ingress resource).
-	translator := translation.NewTranslator(name, namespace, d.secretsNamespace, d.enforceHTTPs, false, d.idleTimeoutSeconds)
-	cec, _, _, err := translator.Translate(m)
+	cec, err := d.cecTranslator.Translate(namespace, name, m)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Set the name to avoid any breaking change during upgrade.
-	cec.Name = fmt.Sprintf("%s-%s-%s", ciliumIngressPrefix, namespace, m.HTTP[0].Sources[0].Name)
-	return cec, getService(m.HTTP[0].Sources[0], m.HTTP[0].Service), getEndpoints(m.HTTP[0].Sources[0]), err
+	cec.Name = cecName
+
+	return cec, d.getService(sourceResource, modelService), getEndpoints(sourceResource), err
 }
 
-func getService(resource model.FullyQualifiedResource, service *model.Service) *corev1.Service {
+func (d *dedicatedIngressTranslator) getService(resource model.FullyQualifiedResource, service *model.Service) *corev1.Service {
 	serviceType := corev1.ServiceTypeLoadBalancer
+	clusterIP := ""
+	if d.hostNetworkEnabled {
+		serviceType = corev1.ServiceTypeClusterIP
+	}
+
 	ports := []corev1.ServicePort{
 		{
 			Name:     "http",
@@ -103,12 +123,14 @@ func getService(resource model.FullyQualifiedResource, service *model.Service) *
 					Kind:       "Ingress",
 					Name:       resource.Name,
 					UID:        types.UID(resource.UID),
+					Controller: model.AddressOf(true),
 				},
 			},
 		},
 		Spec: corev1.ServiceSpec{
-			Type:  serviceType,
-			Ports: ports,
+			Type:      serviceType,
+			ClusterIP: clusterIP,
+			Ports:     ports,
 		},
 	}
 }
@@ -125,6 +147,7 @@ func getEndpoints(resource model.FullyQualifiedResource) *corev1.Endpoints {
 					Kind:       "Ingress",
 					Name:       resource.Name,
 					UID:        types.UID(resource.UID),
+					Controller: model.AddressOf(true),
 				},
 			},
 		},
@@ -134,7 +157,7 @@ func getEndpoints(resource model.FullyQualifiedResource) *corev1.Endpoints {
 				// to the lb map when the service has no backends.
 				// Related github issue https://github.com/cilium/cilium/issues/19262
 				Addresses: []corev1.EndpointAddress{{IP: "192.192.192.192"}}, // dummy
-				Ports:     []corev1.EndpointPort{{Port: 9999}},               //dummy
+				Ports:     []corev1.EndpointPort{{Port: 9999}},               // dummy
 			},
 		},
 	}

@@ -1,6 +1,7 @@
+{{- $kvstoreMetricsEnabled := and .Values.clustermesh.apiserver.kvstoremesh.enabled .Values.clustermesh.apiserver.metrics.kvstoremesh.enabled -}}
 {{- if and
   (or .Values.externalWorkloads.enabled .Values.clustermesh.useAPIServer)
-  (or .Values.clustermesh.apiserver.metrics.enabled .Values.clustermesh.apiserver.metrics.etcd.enabled)
+  (or .Values.clustermesh.apiserver.metrics.enabled $kvstoreMetricsEnabled .Values.clustermesh.apiserver.metrics.etcd.enabled)
   .Values.clustermesh.apiserver.metrics.serviceMonitor.enabled }}
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -13,10 +14,15 @@ metadata:
     {{- with .Values.clustermesh.apiserver.metrics.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  {{- if or .Values.clustermesh.apiserver.metrics.serviceMonitor.annotations .Values.clustermesh.annotations }}
   annotations:
-    {{- with .Values.clustermesh.apiserver.metrics.serviceMonitor.annotations }}
-    {{- toYaml . | nindent 4 }}
+    {{- with .Values.clustermesh.annotations }}
+      {{- toYaml . | nindent 4 }}
     {{- end }}
+    {{- with .Values.clustermesh.apiserver.metrics.serviceMonitor.annotations }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
 spec:
   selector:
     matchLabels:
@@ -36,6 +42,20 @@ spec:
     {{- toYaml . | nindent 4 }}
     {{- end }}
     {{- with .Values.clustermesh.apiserver.metrics.serviceMonitor.metricRelabelings }}
+    metricRelabelings:
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+  {{- if $kvstoreMetricsEnabled }}
+  - port: kvmesh-metrics
+    interval: {{ .Values.clustermesh.apiserver.metrics.serviceMonitor.kvstoremesh.interval | quote }}
+    honorLabels: true
+    path: /metrics
+    {{- with .Values.clustermesh.apiserver.metrics.serviceMonitor.kvstoremesh.relabelings }}
+    relabelings:
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.clustermesh.apiserver.metrics.serviceMonitor.kvstoremesh.metricRelabelings }}
     metricRelabelings:
     {{- toYaml . | nindent 4 }}
     {{- end }}

@@ -243,39 +243,23 @@ func init() {
 		// We only need to test the last k8s version
 		test := suite.NewControlPlaneTest(t, "cnp-status-update-control-plane", k8sVersions[len(k8sVersions)-1])
 
-		// When running with GC disabled, the Nodes Status updates should not be deleted.
+		// CNP nodes status updates are deprecated and should be deleted.
 		test.
 			UpdateObjects(initialObjects...).
-			SetupEnvironment(func(_ *option.DaemonConfig, operatorCfg *operatorOption.OperatorConfig) {
-				operatorCfg.SkipCNPStatusStartupClean = true
-			}).
+			SetupEnvironment().
 			// check that CNPs contain status updates info before starting agent and operator
 			Eventually(func() error { return validateCNPs(test) }).
-			StartAgent().
-			StartOperator(func(vp *viper.Viper) {
-				vp.Set(operatorApi.OperatorAPIServeAddr, "localhost:0")
-			}).
-			Eventually(func() error { return validateCNPs(test) })
-
-		test.StopAgent()
-		test.StopOperator()
-		test.DeleteObjects(initialObjects...)
-
-		// When running with GC enabled, the Nodes Status updates should eventually be deleted.
-		test.
-			UpdateObjects(initialObjects...).
-			SetupEnvironment(func(_ *option.DaemonConfig, operatorCfg *operatorOption.OperatorConfig) {
-				operatorCfg.SkipCNPStatusStartupClean = false
-			}).
-			// check that CNPs contain status updates info before starting agent and operator
-			Eventually(func() error { return validateCNPs(test) }).
-			StartAgent().
-			StartOperator(func(vp *viper.Viper) {
-				vp.Set(operatorApi.OperatorAPIServeAddr, "localhost:0")
-			}).
-			Eventually(func() error { return validateCNPsAfterGC(test) })
-
-		test.StopAgent()
-		test.StopOperator()
+			StartAgent(func(_ *option.DaemonConfig) {}).
+			StartOperator(
+				func(operatorCfg *operatorOption.OperatorConfig) {
+				},
+				func(vp *viper.Viper) {
+					vp.Set(operatorApi.OperatorAPIServeAddr, "localhost:0")
+				},
+			).
+			Eventually(func() error { return validateCNPsAfterGC(test) }).
+			StopAgent().
+			StopOperator().
+			ClearEnvironment()
 	})
 }

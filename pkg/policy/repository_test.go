@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	. "github.com/cilium/checkmate"
+	"github.com/cilium/proxy/pkg/policy/api/kafka"
 
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/checker"
@@ -19,7 +20,8 @@ import (
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy/api"
-	"github.com/cilium/cilium/pkg/policy/api/kafka"
+
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func (ds *PolicyTestSuite) TestComputePolicyEnforcementAndRules(c *C) {
@@ -138,14 +140,14 @@ func (ds *PolicyTestSuite) TestComputePolicyEnforcementAndRules(c *C) {
 	c.Assert(egr, Equals, false, Commentf("egress policy enforcement should not apply since no rules are in repository"))
 	c.Assert(matchingRules, checker.DeepEquals, ruleSlice{}, Commentf("returned matching rules did not match"))
 
-	_, _, err := repo.Add(fooIngressRule1, []Endpoint{})
+	_, _, err := repo.Add(fooIngressRule1)
 	c.Assert(err, IsNil, Commentf("unable to add rule to policy repository"))
 	ing, egr, matchingRules = repo.computePolicyEnforcementAndRules(fooIdentity)
 	c.Assert(ing, Equals, true, Commentf("ingress policy enforcement should apply since ingress rule selects"))
 	c.Assert(egr, Equals, false, Commentf("egress policy enforcement should not apply since no egress rules select"))
 	c.Assert(matchingRules[0].Rule, checker.DeepEquals, fooIngressRule1, Commentf("returned matching rules did not match"))
 
-	_, _, err = repo.Add(fooIngressRule2, []Endpoint{})
+	_, _, err = repo.Add(fooIngressRule2)
 	c.Assert(err, IsNil, Commentf("unable to add rule to policy repository"))
 	ing, egr, matchingRules = repo.computePolicyEnforcementAndRules(fooIdentity)
 	c.Assert(ing, Equals, true, Commentf("ingress policy enforcement should apply since ingress rule selects"))
@@ -169,7 +171,7 @@ func (ds *PolicyTestSuite) TestComputePolicyEnforcementAndRules(c *C) {
 	c.Assert(egr, Equals, false, Commentf("egress policy enforcement should not apply since no rules are in repository"))
 	c.Assert(matchingRules, checker.DeepEquals, ruleSlice{}, Commentf("returned matching rules did not match"))
 
-	_, _, err = repo.Add(fooEgressRule1, []Endpoint{})
+	_, _, err = repo.Add(fooEgressRule1)
 	c.Assert(err, IsNil, Commentf("unable to add rule to policy repository"))
 	ing, egr, matchingRules = repo.computePolicyEnforcementAndRules(fooIdentity)
 	c.Assert(ing, Equals, false, Commentf("ingress policy enforcement should not apply since no ingress rules select"))
@@ -178,7 +180,7 @@ func (ds *PolicyTestSuite) TestComputePolicyEnforcementAndRules(c *C) {
 	_, _, numDeleted = repo.DeleteByLabelsLocked(labels.LabelArray{fooEgressRule1Label})
 	c.Assert(numDeleted, Equals, 1)
 
-	_, _, err = repo.Add(fooEgressRule2, []Endpoint{})
+	_, _, err = repo.Add(fooEgressRule2)
 	c.Assert(err, IsNil, Commentf("unable to add rule to policy repository"))
 	ing, egr, matchingRules = repo.computePolicyEnforcementAndRules(fooIdentity)
 	c.Assert(ing, Equals, false, Commentf("ingress policy enforcement should not apply since no ingress rules select"))
@@ -188,7 +190,7 @@ func (ds *PolicyTestSuite) TestComputePolicyEnforcementAndRules(c *C) {
 	_, _, numDeleted = repo.DeleteByLabelsLocked(labels.LabelArray{fooEgressRule2Label})
 	c.Assert(numDeleted, Equals, 1)
 
-	_, _, err = repo.Add(combinedRule, []Endpoint{})
+	_, _, err = repo.Add(combinedRule)
 	c.Assert(err, IsNil, Commentf("unable to add rule to policy repository"))
 	ing, egr, matchingRules = repo.computePolicyEnforcementAndRules(fooIdentity)
 	c.Assert(ing, Equals, true, Commentf("ingress policy enforcement should apply since ingress rule selects"))
@@ -205,7 +207,7 @@ func (ds *PolicyTestSuite) TestComputePolicyEnforcementAndRules(c *C) {
 	c.Assert(matchingRules, checker.DeepEquals, ruleSlice{}, Commentf("returned matching rules did not match"))
 
 	SetPolicyEnabled(option.NeverEnforce)
-	_, _, err = repo.Add(combinedRule, []Endpoint{})
+	_, _, err = repo.Add(combinedRule)
 	c.Assert(err, IsNil, Commentf("unable to add rule to policy repository"))
 	ing, egr, matchingRules = repo.computePolicyEnforcementAndRules(fooIdentity)
 	c.Assert(ing, Equals, false, Commentf("ingress policy enforcement should not apply since policy enforcement is disabled "))
@@ -241,7 +243,7 @@ func (ds *PolicyTestSuite) TestAddSearchDelete(c *C) {
 	repo.selectorCache = testSelectorCache
 
 	// cannot add empty rule
-	rev, _, err := repo.Add(api.Rule{}, []Endpoint{})
+	rev, _, err := repo.Add(api.Rule{})
 	c.Assert(err, Not(IsNil))
 	c.Assert(rev, Equals, uint64(1))
 
@@ -269,11 +271,11 @@ func (ds *PolicyTestSuite) TestAddSearchDelete(c *C) {
 	nextRevision++
 
 	// add rule1,rule2
-	rev, _, err = repo.Add(rule1, []Endpoint{})
+	rev, _, err = repo.Add(rule1)
 	c.Assert(err, IsNil)
 	c.Assert(rev, Equals, nextRevision)
 	nextRevision++
-	rev, _, err = repo.Add(rule2, []Endpoint{})
+	rev, _, err = repo.Add(rule2)
 	c.Assert(err, IsNil)
 	c.Assert(rev, Equals, nextRevision)
 	nextRevision++
@@ -284,7 +286,7 @@ func (ds *PolicyTestSuite) TestAddSearchDelete(c *C) {
 	repo.Mutex.RUnlock()
 
 	// add rule3
-	rev, _, err = repo.Add(rule3, []Endpoint{})
+	rev, _, err = repo.Add(rule3)
 	c.Assert(err, IsNil)
 	c.Assert(rev, Equals, nextRevision)
 	nextRevision++
@@ -345,7 +347,7 @@ func BenchmarkParseLabel(b *testing.B) {
 					labels.NewLabel("namespace", "default", labels.LabelSourceK8s),
 					labels.NewLabel("tag3", J, labels.LabelSourceK8s),
 				},
-			}, []Endpoint{})
+			})
 			if err == nil {
 				cntAdd++
 			}
@@ -419,11 +421,11 @@ func (ds *PolicyTestSuite) TestAllowsIngress(c *C) {
 		Labels: tag1,
 	}
 
-	_, _, err := repo.Add(rule1, []Endpoint{})
+	_, _, err := repo.Add(rule1)
 	c.Assert(err, IsNil)
-	_, _, err = repo.Add(rule2, []Endpoint{})
+	_, _, err = repo.Add(rule2)
 	c.Assert(err, IsNil)
-	_, _, err = repo.Add(rule3, []Endpoint{})
+	_, _, err = repo.Add(rule3)
 	c.Assert(err, IsNil)
 
 	// foo=>bar is OK
@@ -517,11 +519,11 @@ func (ds *PolicyTestSuite) TestAllowsEgress(c *C) {
 		},
 		Labels: tag1,
 	}
-	_, _, err := repo.Add(rule1, []Endpoint{})
+	_, _, err := repo.Add(rule1)
 	c.Assert(err, IsNil)
-	_, _, err = repo.Add(rule2, []Endpoint{})
+	_, _, err = repo.Add(rule2)
 	c.Assert(err, IsNil)
-	_, _, err = repo.Add(rule3, []Endpoint{})
+	_, _, err = repo.Add(rule3)
 	c.Assert(err, IsNil)
 
 	// foo=>bar is OK
@@ -591,7 +593,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngress(c *C) {
 		Labels: labelsL3,
 	}
 	l3Rule.Sanitize()
-	_, _, err := repo.Add(l3Rule, []Endpoint{})
+	_, _, err := repo.Add(l3Rule)
 	c.Assert(err, IsNil)
 
 	kafkaRule := api.Rule{
@@ -616,7 +618,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngress(c *C) {
 		Labels: labelsKafka,
 	}
 	kafkaRule.Sanitize()
-	_, _, err = repo.Add(kafkaRule, []Endpoint{})
+	_, _, err = repo.Add(kafkaRule)
 	c.Assert(err, IsNil)
 
 	httpRule := api.Rule{
@@ -640,7 +642,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngress(c *C) {
 		},
 		Labels: labelsHTTP,
 	}
-	_, _, err = repo.Add(httpRule, []Endpoint{})
+	_, _, err = repo.Add(httpRule)
 	c.Assert(err, IsNil)
 
 	l7Rule := api.Rule{
@@ -663,9 +665,10 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngress(c *C) {
 		},
 		Labels: labelsL7,
 	}
-	_, _, err = repo.Add(l7Rule, []Endpoint{})
+	_, _, err = repo.Add(l7Rule)
 	c.Assert(err, IsNil)
 
+	icmpV4Type := intstr.FromInt(8)
 	icmpRule := api.Rule{
 		EndpointSelector: selFoo,
 		Ingress: []api.IngressRule{
@@ -675,16 +678,17 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngress(c *C) {
 				},
 				ICMPs: api.ICMPRules{{
 					Fields: []api.ICMPField{{
-						Type: 8,
+						Type: &icmpV4Type,
 					}},
 				}},
 			},
 		},
 		Labels: labelsICMP,
 	}
-	_, _, err = repo.Add(icmpRule, nil)
+	_, _, err = repo.Add(icmpRule)
 	c.Assert(err, IsNil)
 
+	icmpV6Type := intstr.FromInt(128)
 	icmpV6Rule := api.Rule{
 		EndpointSelector: selFoo,
 		Ingress: []api.IngressRule{
@@ -694,7 +698,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngress(c *C) {
 				},
 				ICMPs: api.ICMPRules{{
 					Fields: []api.ICMPField{{
-						Type:   128,
+						Type:   &icmpV6Type,
 						Family: api.IPv6Family,
 					}},
 				}},
@@ -702,7 +706,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngress(c *C) {
 		},
 		Labels: labelsICMPv6,
 	}
-	_, _, err = repo.Add(icmpV6Rule, nil)
+	_, _, err = repo.Add(icmpV6Rule)
 	c.Assert(err, IsNil)
 
 	ctx := &SearchContext{
@@ -830,7 +834,7 @@ func (ds *PolicyTestSuite) TestWildcardL4RulesIngress(c *C) {
 		Labels: labelsL4Kafka,
 	}
 	l49092Rule.Sanitize()
-	_, _, err := repo.Add(l49092Rule, []Endpoint{})
+	_, _, err := repo.Add(l49092Rule)
 	c.Assert(err, IsNil)
 
 	kafkaRule := api.Rule{
@@ -855,7 +859,7 @@ func (ds *PolicyTestSuite) TestWildcardL4RulesIngress(c *C) {
 		Labels: labelsL7Kafka,
 	}
 	kafkaRule.Sanitize()
-	_, _, err = repo.Add(kafkaRule, []Endpoint{})
+	_, _, err = repo.Add(kafkaRule)
 	c.Assert(err, IsNil)
 
 	l480Rule := api.Rule{
@@ -875,7 +879,7 @@ func (ds *PolicyTestSuite) TestWildcardL4RulesIngress(c *C) {
 		Labels: labelsL4HTTP,
 	}
 	l480Rule.Sanitize()
-	_, _, err = repo.Add(l480Rule, []Endpoint{})
+	_, _, err = repo.Add(l480Rule)
 	c.Assert(err, IsNil)
 
 	httpRule := api.Rule{
@@ -899,7 +903,7 @@ func (ds *PolicyTestSuite) TestWildcardL4RulesIngress(c *C) {
 		},
 		Labels: labelsL7HTTP,
 	}
-	_, _, err = repo.Add(httpRule, []Endpoint{})
+	_, _, err = repo.Add(httpRule)
 	c.Assert(err, IsNil)
 
 	ctx := &SearchContext{
@@ -989,7 +993,7 @@ func (ds *PolicyTestSuite) TestL3DependentL4IngressFromRequires(c *C) {
 		},
 	}
 	l480Rule.Sanitize()
-	_, _, err := repo.Add(l480Rule, []Endpoint{})
+	_, _, err := repo.Add(l480Rule)
 	c.Assert(err, IsNil)
 
 	ctx := &SearchContext{
@@ -1009,7 +1013,7 @@ func (ds *PolicyTestSuite) TestL3DependentL4IngressFromRequires(c *C) {
 			Values:   []string{"bar2"},
 		},
 	})
-	expectedCachedSelector, _ := testSelectorCache.AddIdentitySelector(dummySelectorCacheUser, expectedSelector)
+	expectedCachedSelector, _ := testSelectorCache.AddIdentitySelector(dummySelectorCacheUser, nil, expectedSelector)
 
 	expectedPolicy := L4PolicyMap{
 		"80/TCP": &L4Filter{
@@ -1063,7 +1067,7 @@ func (ds *PolicyTestSuite) TestL3DependentL4EgressFromRequires(c *C) {
 		},
 	}
 	l480Rule.Sanitize()
-	_, _, err := repo.Add(l480Rule, []Endpoint{})
+	_, _, err := repo.Add(l480Rule)
 	c.Assert(err, IsNil)
 
 	ctx := &SearchContext{
@@ -1091,8 +1095,8 @@ func (ds *PolicyTestSuite) TestL3DependentL4EgressFromRequires(c *C) {
 			Values:   []string{"bar2"},
 		},
 	})
-	expectedCachedSelector, _ := testSelectorCache.AddIdentitySelector(dummySelectorCacheUser, expectedSelector)
-	expectedCachedSelector2, _ := testSelectorCache.AddIdentitySelector(dummySelectorCacheUser, expectedSelector2)
+	expectedCachedSelector, _ := testSelectorCache.AddIdentitySelector(dummySelectorCacheUser, nil, expectedSelector)
+	expectedCachedSelector2, _ := testSelectorCache.AddIdentitySelector(dummySelectorCacheUser, nil, expectedSelector2)
 
 	expectedPolicy := L4PolicyMap{
 		"0/ANY": &L4Filter{
@@ -1150,7 +1154,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgress(c *C) {
 		Labels: labelsL4,
 	}
 	l3Rule.Sanitize()
-	_, _, err := repo.Add(l3Rule, []Endpoint{})
+	_, _, err := repo.Add(l3Rule)
 	c.Assert(err, IsNil)
 
 	dnsRule := api.Rule{
@@ -1175,7 +1179,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgress(c *C) {
 		Labels: labelsDNS,
 	}
 	dnsRule.Sanitize()
-	_, _, err = repo.Add(dnsRule, []Endpoint{})
+	_, _, err = repo.Add(dnsRule)
 	c.Assert(err, IsNil)
 
 	httpRule := api.Rule{
@@ -1199,9 +1203,10 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgress(c *C) {
 		},
 		Labels: labelsHTTP,
 	}
-	_, _, err = repo.Add(httpRule, []Endpoint{})
+	_, _, err = repo.Add(httpRule)
 	c.Assert(err, IsNil)
 
+	icmpV4Type := intstr.FromInt(8)
 	icmpRule := api.Rule{
 		EndpointSelector: selFoo,
 		Egress: []api.EgressRule{
@@ -1211,16 +1216,17 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgress(c *C) {
 				},
 				ICMPs: api.ICMPRules{{
 					Fields: []api.ICMPField{{
-						Type: 8,
+						Type: &icmpV4Type,
 					}},
 				}},
 			},
 		},
 		Labels: labelsICMP,
 	}
-	_, _, err = repo.Add(icmpRule, nil)
+	_, _, err = repo.Add(icmpRule)
 	c.Assert(err, IsNil)
 
+	icmpV6Type := intstr.FromInt(128)
 	icmpV6Rule := api.Rule{
 		EndpointSelector: selFoo,
 		Egress: []api.EgressRule{
@@ -1230,7 +1236,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgress(c *C) {
 				},
 				ICMPs: api.ICMPRules{{
 					Fields: []api.ICMPField{{
-						Type:   128,
+						Type:   &icmpV6Type,
 						Family: "IPv6",
 					}},
 				}},
@@ -1238,7 +1244,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgress(c *C) {
 		},
 		Labels: labelsICMPv6,
 	}
-	_, _, err = repo.Add(icmpV6Rule, nil)
+	_, _, err = repo.Add(icmpV6Rule)
 	c.Assert(err, IsNil)
 
 	ctx := &SearchContext{
@@ -1357,7 +1363,7 @@ func (ds *PolicyTestSuite) TestWildcardL4RulesEgress(c *C) {
 		Labels: labelsL3DNS,
 	}
 	l453Rule.Sanitize()
-	_, _, err := repo.Add(l453Rule, []Endpoint{})
+	_, _, err := repo.Add(l453Rule)
 	c.Assert(err, IsNil)
 
 	dnsRule := api.Rule{
@@ -1382,7 +1388,7 @@ func (ds *PolicyTestSuite) TestWildcardL4RulesEgress(c *C) {
 		Labels: labelsL7DNS,
 	}
 	dnsRule.Sanitize()
-	_, _, err = repo.Add(dnsRule, []Endpoint{})
+	_, _, err = repo.Add(dnsRule)
 	c.Assert(err, IsNil)
 
 	l480Rule := api.Rule{
@@ -1402,7 +1408,7 @@ func (ds *PolicyTestSuite) TestWildcardL4RulesEgress(c *C) {
 		Labels: labelsL3HTTP,
 	}
 	l480Rule.Sanitize()
-	_, _, err = repo.Add(l480Rule, []Endpoint{})
+	_, _, err = repo.Add(l480Rule)
 	c.Assert(err, IsNil)
 
 	httpRule := api.Rule{
@@ -1426,7 +1432,7 @@ func (ds *PolicyTestSuite) TestWildcardL4RulesEgress(c *C) {
 		},
 		Labels: labelsL7HTTP,
 	}
-	_, _, err = repo.Add(httpRule, []Endpoint{})
+	_, _, err = repo.Add(httpRule)
 	c.Assert(err, IsNil)
 
 	ctx := &SearchContext{
@@ -1502,7 +1508,7 @@ func (ds *PolicyTestSuite) TestWildcardCIDRRulesEgress(c *C) {
 	cidrSelectors := cidrSlice.GetAsEndpointSelectors()
 	var cachedSelectors CachedSelectorSlice
 	for i := range cidrSelectors {
-		c, _ := testSelectorCache.AddIdentitySelector(dummySelectorCacheUser, cidrSelectors[i])
+		c, _ := testSelectorCache.AddIdentitySelector(dummySelectorCacheUser, nil, cidrSelectors[i])
 		cachedSelectors = append(cachedSelectors, c)
 		defer testSelectorCache.RemoveSelector(c, dummySelectorCacheUser)
 	}
@@ -1537,7 +1543,7 @@ func (ds *PolicyTestSuite) TestWildcardCIDRRulesEgress(c *C) {
 		Labels: labelsHTTP,
 	}
 	l480Get.Sanitize()
-	_, _, err := repo.Add(l480Get, []Endpoint{})
+	_, _, err := repo.Add(l480Get)
 	c.Assert(err, IsNil)
 
 	l3Rule := api.Rule{
@@ -1552,7 +1558,7 @@ func (ds *PolicyTestSuite) TestWildcardCIDRRulesEgress(c *C) {
 		Labels: labelsL3,
 	}
 	l3Rule.Sanitize()
-	_, _, err = repo.Add(l3Rule, []Endpoint{})
+	_, _, err = repo.Add(l3Rule)
 	c.Assert(err, IsNil)
 
 	ctx := &SearchContext{
@@ -1631,7 +1637,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngressFromEntities(c *C) {
 		Labels: labelsL3,
 	}
 	l3Rule.Sanitize()
-	_, _, err := repo.Add(l3Rule, []Endpoint{})
+	_, _, err := repo.Add(l3Rule)
 	c.Assert(err, IsNil)
 
 	kafkaRule := api.Rule{
@@ -1656,7 +1662,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngressFromEntities(c *C) {
 		Labels: labelsKafka,
 	}
 	kafkaRule.Sanitize()
-	_, _, err = repo.Add(kafkaRule, []Endpoint{})
+	_, _, err = repo.Add(kafkaRule)
 	c.Assert(err, IsNil)
 
 	httpRule := api.Rule{
@@ -1680,7 +1686,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngressFromEntities(c *C) {
 		},
 		Labels: labelsHTTP,
 	}
-	_, _, err = repo.Add(httpRule, []Endpoint{})
+	_, _, err = repo.Add(httpRule)
 	c.Assert(err, IsNil)
 
 	ctx := &SearchContext{
@@ -1698,6 +1704,12 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngressFromEntities(c *C) {
 	cachedSelectorWorld := testSelectorCache.FindCachedIdentitySelector(selWorld)
 	c.Assert(cachedSelectorWorld, Not(IsNil))
 
+	cachedSelectorWorldV4 := testSelectorCache.FindCachedIdentitySelector(api.ReservedEndpointSelectors[labels.IDNameWorldIPv4])
+	c.Assert(cachedSelectorWorldV4, Not(IsNil))
+
+	cachedSelectorWorldV6 := testSelectorCache.FindCachedIdentitySelector(api.ReservedEndpointSelectors[labels.IDNameWorldIPv6])
+	c.Assert(cachedSelectorWorldV6, Not(IsNil))
+
 	expectedPolicy := L4PolicyMap{
 		"0/ANY": {
 			Port:     0,
@@ -1705,10 +1717,16 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesIngressFromEntities(c *C) {
 			U8Proto:  0x0,
 			L7Parser: "",
 			PerSelectorPolicies: L7DataMap{
-				cachedSelectorWorld: nil,
+				cachedSelectorWorld:   nil,
+				cachedSelectorWorldV4: nil,
+				cachedSelectorWorldV6: nil,
 			},
-			Ingress:    true,
-			RuleOrigin: map[CachedSelector]labels.LabelArrayList{cachedSelectorWorld: {labelsL3}},
+			Ingress: true,
+			RuleOrigin: map[CachedSelector]labels.LabelArrayList{
+				cachedSelectorWorld:   {labelsL3},
+				cachedSelectorWorldV4: {labelsL3},
+				cachedSelectorWorldV6: {labelsL3},
+			},
 		},
 		"9092/TCP": {
 			Port:     9092,
@@ -1771,7 +1789,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgressToEntities(c *C) {
 		Labels: labelsL3,
 	}
 	l3Rule.Sanitize()
-	_, _, err := repo.Add(l3Rule, []Endpoint{})
+	_, _, err := repo.Add(l3Rule)
 	c.Assert(err, IsNil)
 
 	dnsRule := api.Rule{
@@ -1796,7 +1814,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgressToEntities(c *C) {
 		Labels: labelsDNS,
 	}
 	dnsRule.Sanitize()
-	_, _, err = repo.Add(dnsRule, []Endpoint{})
+	_, _, err = repo.Add(dnsRule)
 	c.Assert(err, IsNil)
 
 	httpRule := api.Rule{
@@ -1820,7 +1838,7 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgressToEntities(c *C) {
 		},
 		Labels: labelsHTTP,
 	}
-	_, _, err = repo.Add(httpRule, []Endpoint{})
+	_, _, err = repo.Add(httpRule)
 	c.Assert(err, IsNil)
 
 	ctx := &SearchContext{
@@ -1838,6 +1856,12 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgressToEntities(c *C) {
 	cachedSelectorWorld := testSelectorCache.FindCachedIdentitySelector(selWorld)
 	c.Assert(cachedSelectorWorld, Not(IsNil))
 
+	cachedSelectorWorldV4 := testSelectorCache.FindCachedIdentitySelector(api.ReservedEndpointSelectors[labels.IDNameWorldIPv4])
+	c.Assert(cachedSelectorWorldV4, Not(IsNil))
+
+	cachedSelectorWorldV6 := testSelectorCache.FindCachedIdentitySelector(api.ReservedEndpointSelectors[labels.IDNameWorldIPv6])
+	c.Assert(cachedSelectorWorldV6, Not(IsNil))
+
 	expectedPolicy := L4PolicyMap{
 		"0/ANY": {
 			Port:     0,
@@ -1845,10 +1869,16 @@ func (ds *PolicyTestSuite) TestWildcardL3RulesEgressToEntities(c *C) {
 			U8Proto:  0x0,
 			L7Parser: "",
 			PerSelectorPolicies: L7DataMap{
-				cachedSelectorWorld: nil,
+				cachedSelectorWorld:   nil,
+				cachedSelectorWorldV4: nil,
+				cachedSelectorWorldV6: nil,
 			},
-			Ingress:    false,
-			RuleOrigin: map[CachedSelector]labels.LabelArrayList{cachedSelectorWorld: {labelsL3}},
+			Ingress: false,
+			RuleOrigin: map[CachedSelector]labels.LabelArrayList{
+				cachedSelectorWorld:   {labelsL3},
+				cachedSelectorWorldV4: {labelsL3},
+				cachedSelectorWorldV6: {labelsL3},
+			},
 		},
 		"53/UDP": {
 			Port:     53,
@@ -1933,7 +1963,7 @@ func (ds *PolicyTestSuite) TestMinikubeGettingStarted(c *C) {
 				}},
 			},
 		},
-	}, []Endpoint{})
+	})
 	c.Assert(err, IsNil)
 
 	_, _, err = repo.Add(api.Rule{
@@ -1955,7 +1985,7 @@ func (ds *PolicyTestSuite) TestMinikubeGettingStarted(c *C) {
 				}},
 			},
 		},
-	}, []Endpoint{})
+	})
 	c.Assert(err, IsNil)
 
 	_, _, err = repo.Add(api.Rule{
@@ -1977,7 +2007,7 @@ func (ds *PolicyTestSuite) TestMinikubeGettingStarted(c *C) {
 				}},
 			},
 		},
-	}, []Endpoint{})
+	})
 	c.Assert(err, IsNil)
 
 	repo.Mutex.RLock()
@@ -1992,7 +2022,7 @@ func (ds *PolicyTestSuite) TestMinikubeGettingStarted(c *C) {
 	c.Assert(cachedSelectorApp2, Not(IsNil))
 
 	expected := NewL4Policy(repo.GetRevision())
-	expected.Ingress["80/TCP"] = &L4Filter{
+	expected.Ingress.PortRules["80/TCP"] = &L4Filter{
 		Port: 80, Protocol: api.ProtoTCP, U8Proto: 6,
 		L7Parser: ParserTypeHTTP,
 		PerSelectorPolicies: L7DataMap{
@@ -2007,7 +2037,7 @@ func (ds *PolicyTestSuite) TestMinikubeGettingStarted(c *C) {
 		RuleOrigin: map[CachedSelector]labels.LabelArrayList{cachedSelectorApp2: {nil}},
 	}
 
-	if equal, err := checker.DeepEqual(l4IngressPolicy, expected.Ingress); !equal {
+	if equal, err := checker.DeepEqual(l4IngressPolicy, expected.Ingress.PortRules); !equal {
 		c.Logf("%s", logBuffer.String())
 		c.Errorf("Resolved policy did not match expected: \n%s", err)
 	}
@@ -2019,7 +2049,7 @@ func (ds *PolicyTestSuite) TestMinikubeGettingStarted(c *C) {
 	l4IngressPolicy, err = repo.ResolveL4IngressPolicy(fromApp3)
 	c.Assert(err, IsNil)
 	c.Assert(len(l4IngressPolicy), Equals, 0)
-	c.Assert(l4IngressPolicy, checker.Equals, expected.Ingress)
+	c.Assert(l4IngressPolicy, checker.Equals, expected.Ingress.PortRules)
 	l4IngressPolicy.Detach(testSelectorCache)
 	expected.Detach(testSelectorCache)
 }
@@ -2121,7 +2151,7 @@ Ingress verdict: denied
 
 	// Now, add extra rules to allow specifically baz=>bar on port 80
 	l4rule := buildRule("baz", "bar", "80")
-	_, _, err := repo.Add(l4rule, []Endpoint{})
+	_, _, err := repo.Add(l4rule)
 	c.Assert(err, IsNil)
 
 	// baz=>bar:80 is OK
@@ -2174,7 +2204,7 @@ Ingress verdict: denied
 			},
 		}},
 	}
-	_, _, err = repo.Add(l3rule, []Endpoint{})
+	_, _, err = repo.Add(l3rule)
 	c.Assert(err, IsNil)
 
 	// foo=>bar is now denied due to the FromRequires
@@ -2309,7 +2339,7 @@ func (ds *PolicyTestSuite) TestIterate(c *C) {
 					},
 				},
 			},
-		}, []Endpoint{})
+		})
 		c.Assert(err, IsNil)
 	}
 

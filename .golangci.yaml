@@ -48,7 +48,7 @@ linters-settings:
     enable:
       - nilness
   goimports:
-    local-prefixes: github.com/cilium/cilium
+    local-prefixes: github.com/cilium/cilium/
   staticcheck:
     go: "1.20"
   unused:
@@ -66,11 +66,22 @@ linters-settings:
   gomodguard:
     blocked:
       modules:
+        - github.com/miekg/dns:
+            recommendations:
+              - github.com/cilium/dns
+            reason: "use the cilium fork directly to avoid replace directives in go.mod, see https://github.com/cilium/cilium/pull/27582"
         - gopkg.in/check.v1:
             recommendations:
               - testing
               - github.com/stretchr/testify/assert
             reason: "gocheck has been deprecated, see https://docs.cilium.io/en/latest/contributing/testing/unit/#migrating-tests-off-of-gopkg-in-check-v1"
+        - go.uber.org/multierr:
+            recommendations:
+              - errors
+            reason: "Go 1.20+ has support for combining multiple errors, see https://go.dev/doc/go1.20#errors"
+
+  stylecheck:
+    checks: ["ST1019"]
 
 issues:
   # Excluding configuration per-path, per-linter, per-text and per-source
@@ -102,10 +113,12 @@ linters:
     - ineffassign
     - misspell
     - staticcheck
+    - stylecheck
     - unused
     - goheader
     - gosec
     - gomodguard
+    - gosimple
 
 # To enable later if makes sense
 #    - deadcode

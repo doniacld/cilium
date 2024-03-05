@@ -22,7 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"sigs.k8s.io/gateway-api/apis/v1beta1"
+	v1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/conformance/utils/kubernetes"
 	"sigs.k8s.io/gateway-api/conformance/utils/suite"
 )
@@ -34,21 +34,26 @@ func init() {
 var HTTPRouteDisallowedKind = suite.ConformanceTest{
 	ShortName:   "HTTPRouteDisallowedKind",
 	Description: "A single HTTPRoute in the gateway-conformance-infra namespace should fail to attach to a Gateway with no listeners that allow the HTTPRoute kind",
-	Features:    []suite.SupportedFeature{suite.SupportTLSRoute},
-	Manifests:   []string{"tests/httproute-disallowed-kind.yaml"},
+	Features: []suite.SupportedFeature{
+		suite.SupportGateway,
+		suite.SupportHTTPRoute,
+		suite.SupportTLSRoute,
+	},
+	Manifests: []string{"tests/httproute-disallowed-kind.yaml"},
 	Test: func(t *testing.T, suite *suite.ConformanceTestSuite) {
 		// This test creates an additional Gateway in the gateway-conformance-infra
 		// namespace so we have to wait for it to be ready.
-		kubernetes.NamespacesMustBeAccepted(t, suite.Client, suite.TimeoutConfig, []string{"gateway-conformance-infra"})
+		kubernetes.NamespacesMustBeReady(t, suite.Client, suite.TimeoutConfig, []string{"gateway-conformance-infra"})
 
 		routeNN := types.NamespacedName{Name: "disallowed-kind", Namespace: "gateway-conformance-infra"}
 		gwNN := types.NamespacedName{Name: "tlsroutes-only", Namespace: "gateway-conformance-infra"}
+		kubernetes.HTTPRouteMustHaveResolvedRefsConditionsTrue(t, suite.Client, suite.TimeoutConfig, routeNN, gwNN)
 
 		t.Run("Route should not have been accepted with reason NotAllowedByListeners", func(t *testing.T) {
 			kubernetes.HTTPRouteMustHaveCondition(t, suite.Client, suite.TimeoutConfig, routeNN, gwNN, metav1.Condition{
-				Type:   string(v1beta1.RouteConditionAccepted),
+				Type:   string(v1.RouteConditionAccepted),
 				Status: metav1.ConditionFalse,
-				Reason: string(v1beta1.RouteReasonNotAllowedByListeners),
+				Reason: string(v1.RouteReasonNotAllowedByListeners),
 			})
 		})
 		t.Run("Route should not have Parents set in status", func(t *testing.T) {

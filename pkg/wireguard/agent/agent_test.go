@@ -81,8 +81,7 @@ func containsIP(allowedIPs []net.IPNet, ipnet *net.IPNet) bool {
 
 func newTestAgent(ctx context.Context) (*Agent, *ipcache.IPCache) {
 	ipCache := ipcache.NewIPCache(&ipcache.Configuration{
-		Context:       ctx,
-		NodeIDHandler: &mockNodeHandler{},
+		Context: ctx,
 	})
 	wgAgent := &Agent{
 		wgClient:         &fakeWgClient{},
@@ -116,7 +115,9 @@ func (a *AgentSuite) TestAgent_PeerConfig(c *C) {
 	c.Assert(k8s1.nodeIPv4, checker.DeepEquals, k8s1NodeIPv4)
 	c.Assert(k8s1.nodeIPv6, checker.DeepEquals, k8s1NodeIPv6)
 	c.Assert(k8s1.pubKey.String(), Equals, k8s1PubKey)
-	c.Assert(k8s1.allowedIPs, HasLen, 4)
+	c.Assert(k8s1.allowedIPs, HasLen, 6)
+	c.Assert(containsIP(k8s1.allowedIPs, iputil.IPToPrefix(k8s1NodeIPv4)), Equals, true)
+	c.Assert(containsIP(k8s1.allowedIPs, iputil.IPToPrefix(k8s1NodeIPv6)), Equals, true)
 	c.Assert(containsIP(k8s1.allowedIPs, pod1IPv4), Equals, true)
 	c.Assert(containsIP(k8s1.allowedIPs, pod1IPv6), Equals, true)
 	c.Assert(containsIP(k8s1.allowedIPs, pod2IPv4), Equals, true)
@@ -183,7 +184,9 @@ func (a *AgentSuite) TestAgent_PeerConfig(c *C) {
 	c.Assert(k8s1.nodeIPv4, checker.DeepEquals, k8s1NodeIPv4)
 	c.Assert(k8s1.nodeIPv6, checker.DeepEquals, k8s1NodeIPv6)
 	c.Assert(k8s1.pubKey.String(), Equals, k8s1PubKey)
-	c.Assert(k8s1.allowedIPs, HasLen, 2)
+	c.Assert(k8s1.allowedIPs, HasLen, 4)
+	c.Assert(containsIP(k8s1.allowedIPs, iputil.IPToPrefix(k8s1NodeIPv4)), Equals, true)
+	c.Assert(containsIP(k8s1.allowedIPs, iputil.IPToPrefix(k8s1NodeIPv6)), Equals, true)
 	c.Assert(containsIP(k8s1.allowedIPs, pod2IPv4), Equals, true)
 	c.Assert(containsIP(k8s1.allowedIPs, pod2IPv6), Equals, true)
 
@@ -191,7 +194,9 @@ func (a *AgentSuite) TestAgent_PeerConfig(c *C) {
 	c.Assert(k8s2.nodeIPv4, checker.DeepEquals, k8s2NodeIPv4)
 	c.Assert(k8s2.nodeIPv6, checker.DeepEquals, k8s2NodeIPv6)
 	c.Assert(k8s2.pubKey.String(), Equals, k8s2PubKey)
-	c.Assert(k8s2.allowedIPs, HasLen, 2)
+	c.Assert(k8s2.allowedIPs, HasLen, 4)
+	c.Assert(containsIP(k8s2.allowedIPs, iputil.IPToPrefix(k8s2NodeIPv4)), Equals, true)
+	c.Assert(containsIP(k8s2.allowedIPs, iputil.IPToPrefix(k8s2NodeIPv6)), Equals, true)
 	c.Assert(containsIP(k8s2.allowedIPs, pod3IPv4), Equals, true)
 	c.Assert(containsIP(k8s2.allowedIPs, pod3IPv6), Equals, true)
 
@@ -211,7 +216,6 @@ func (a *AgentSuite) TestAgent_PeerConfig_WithEncryptNode(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	wgAgent, ipCache := newTestAgent(ctx)
-	wgAgent.nodeToNodeEncryption = true
 	defer ipCache.Shutdown()
 
 	ipCache.Upsert(pod1IPv4Str, k8s1NodeIPv4, 0, nil, ipcache.Identity{ID: 1, Source: source.Kubernetes})
@@ -230,14 +234,4 @@ func (a *AgentSuite) TestAgent_PeerConfig_WithEncryptNode(c *C) {
 	c.Assert(containsIP(k8s1.allowedIPs, pod2IPv4), Equals, true)
 	c.Assert(containsIP(k8s1.allowedIPs, iputil.IPToPrefix(k8s1NodeIPv4)), Equals, true)
 	c.Assert(containsIP(k8s1.allowedIPs, iputil.IPToPrefix(k8s1NodeIPv6)), Equals, true)
-}
-
-type mockNodeHandler struct{}
-
-func (m *mockNodeHandler) AllocateNodeID(_ net.IP) uint16 {
-	return 0
-}
-
-func (m *mockNodeHandler) GetNodeIP(_ uint16) string {
-	return ""
 }

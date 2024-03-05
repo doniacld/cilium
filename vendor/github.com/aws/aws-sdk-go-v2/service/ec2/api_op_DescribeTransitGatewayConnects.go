@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -32,28 +31,19 @@ type DescribeTransitGatewayConnectsInput struct {
 
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	// One or more filters. The possible values are:
-	//
-	// * options.protocol - The tunnel
-	// protocol (gre).
-	//
-	// * state - The state of the attachment (initiating |
-	// initiatingRequest | pendingAcceptance | rollingBack | pending | available |
-	// modifying | deleting | deleted | failed | rejected | rejecting | failing).
-	//
-	// *
-	// transit-gateway-attachment-id - The ID of the Connect attachment.
-	//
-	// *
-	// transit-gateway-id - The ID of the transit gateway.
-	//
-	// *
-	// transport-transit-gateway-attachment-id - The ID of the transit gateway
-	// attachment from which the Connect attachment was created.
+	//   - options.protocol - The tunnel protocol ( gre ).
+	//   - state - The state of the attachment ( initiating | initiatingRequest |
+	//   pendingAcceptance | rollingBack | pending | available | modifying | deleting |
+	//   deleted | failed | rejected | rejecting | failing ).
+	//   - transit-gateway-attachment-id - The ID of the Connect attachment.
+	//   - transit-gateway-id - The ID of the transit gateway.
+	//   - transport-transit-gateway-attachment-id - The ID of the transit gateway
+	//   attachment from which the Connect attachment was created.
 	Filters []types.Filter
 
 	// The maximum number of results to return with a single call. To retrieve the
@@ -85,6 +75,9 @@ type DescribeTransitGatewayConnectsOutput struct {
 }
 
 func (c *Client) addOperationDescribeTransitGatewayConnectsMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeTransitGatewayConnects{}, middleware.After)
 	if err != nil {
 		return err
@@ -93,34 +86,38 @@ func (c *Client) addOperationDescribeTransitGatewayConnectsMiddlewares(stack *mi
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeTransitGatewayConnects"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -129,7 +126,13 @@ func (c *Client) addOperationDescribeTransitGatewayConnectsMiddlewares(stack *mi
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeTransitGatewayConnects(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -139,6 +142,9 @@ func (c *Client) addOperationDescribeTransitGatewayConnectsMiddlewares(stack *mi
 		return err
 	}
 	if err = addRequestResponseLogging(stack, options); err != nil {
+		return err
+	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
 	return nil
@@ -242,7 +248,6 @@ func newServiceMetadataMiddleware_opDescribeTransitGatewayConnects(region string
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeTransitGatewayConnects",
 	}
 }

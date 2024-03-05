@@ -5,6 +5,7 @@ package gateway_api
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -12,10 +13,12 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
+	controllerruntime "github.com/cilium/cilium/operator/pkg/controller-runtime"
+	"github.com/cilium/cilium/operator/pkg/gateway-api/routechecks"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 )
 
@@ -35,76 +38,96 @@ func (r *tlsRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	original := &gatewayv1alpha2.TLSRoute{}
 	if err := r.Client.Get(ctx, req.NamespacedName, original); err != nil {
 		if k8serrors.IsNotFound(err) {
-			return success()
+			return controllerruntime.Success()
 		}
 		scopedLog.WithError(err).Error("Unable to fetch TLSRoute")
-		return fail(err)
+		return controllerruntime.Fail(err)
 	}
 
 	// Ignore deleted TLSRoute, this can happen when foregroundDeletion is enabled
 	if original.GetDeletionTimestamp() != nil {
-		return success()
+		return controllerruntime.Success()
 	}
 
 	tr := original.DeepCopy()
-	defer func() {
-		if err := r.updateStatus(ctx, original, tr); err != nil {
-			scopedLog.WithError(err).Error("Failed to update TLSRoute status")
-		}
-	}()
 
-	// backend validators
-	for _, fn := range []backendValidationFunc{
-		checkAgainstCrossNamespaceReferences,
-		checkBackendIsService,
-		checkBackendIsExistingService,
-	} {
-		if res, continueCheck, err := fn(ctx, scopedLog.WithField(logfields.Resource, tr), r.Client, tr); err != nil || !continueCheck {
-			return res, err
-		}
+	// check if this cert is allowed to be used by this gateway
+	grants := &gatewayv1beta1.ReferenceGrantList{}
+	if err := r.Client.List(ctx, grants); err != nil {
+		return r.handleReconcileErrorWithStatus(ctx, fmt.Errorf("failed to retrieve reference grants: %w", err), original, tr)
+	}
+
+	// input for the validators
+	i := &routechecks.TLSRouteInput{
+		Ctx:      ctx,
+		Logger:   scopedLog.WithField(logfields.Resource, tr),
+		Client:   r.Client,
+		Grants:   grants,
+		TLSRoute: tr,
 	}
 
 	// gateway validators
 	for _, parent := range tr.Spec.ParentRefs {
-		ns := namespaceDerefOr(parent.Namespace, tr.GetNamespace())
-		gw := &gatewayv1beta1.Gateway{}
 
-		if err := r.Client.Get(ctx, client.ObjectKey{Namespace: ns, Name: string(parent.Name)}, gw); err != nil {
+		// set acceptance to okay, this wil be overwritten in checks if needed
+		i.SetParentCondition(parent, metav1.Condition{
+			Type:    string(gatewayv1.RouteConditionAccepted),
+			Status:  metav1.ConditionTrue,
+			Reason:  string(gatewayv1.RouteReasonAccepted),
+			Message: "Accepted TLSRoute",
+		})
 
-			// pass the error to the status
-			mergeTLSRouteStatusConditions(tr, parent, []metav1.Condition{
-				tlsRouteAcceptedCondition(tr, false, err.Error()),
-			})
-
-			if !k8serrors.IsNotFound(err) {
-				// if it is not just a not found error, we should return the error as something is bad
-				return fail(err)
-			}
-
-			// Gateway does not exist skip further checks
-			continue
-		}
+		// set status to okay, this wil be overwritten in checks if needed
+		i.SetAllParentCondition(metav1.Condition{
+			Type:    string(gatewayv1.RouteConditionResolvedRefs),
+			Status:  metav1.ConditionTrue,
+			Reason:  string(gatewayv1.RouteReasonResolvedRefs),
+			Message: "Service reference is valid",
+		})
 
 		// run the actual validators
-		for _, fn := range []gatewayParentValidatonFunc{
-			checkGatewayAllowedForNamespace,
-			checkGatewayRouteKindAllowed,
-			checkMatchingGatewayPorts,
-			checkMatchingGatewayHostnames,
+		for _, fn := range []routechecks.CheckGatewayFunc{
+			routechecks.CheckGatewayAllowedForNamespace,
+			routechecks.CheckGatewayRouteKindAllowed,
+			routechecks.CheckGatewayMatchingPorts,
+			routechecks.CheckGatewayMatchingHostnames,
+			routechecks.CheckGatewayMatchingSection,
 		} {
-			if res, continueCheck, err := fn(ctx, scopedLog.WithField(logfields.Resource, tr), r.Client, parent, gw, tr); err != nil || !continueCheck {
-				return res, err
+			continueCheck, err := fn(i, parent)
+			if err != nil {
+				return r.handleReconcileErrorWithStatus(ctx, fmt.Errorf("failed to apply route check: %w", err), original, tr)
+			}
+
+			if !continueCheck {
+				break
 			}
 		}
+	}
 
-		// Gateway is attachable, update the status for this HTTPRoute
-		mergeTLSRouteStatusConditions(tr, parent, []metav1.Condition{
-			tlsRouteAcceptedCondition(tr, true, tlsRouteAcceptedMessage),
-		})
+	// backend validators
+
+	for _, fn := range []routechecks.CheckRuleFunc{
+		routechecks.CheckAgainstCrossNamespaceBackendReferences,
+		routechecks.CheckBackend,
+		routechecks.CheckHasServiceImportSupport,
+		routechecks.CheckBackendIsExistingService,
+	} {
+		continueCheck, err := fn(i)
+		if err != nil {
+			return r.handleReconcileErrorWithStatus(ctx, fmt.Errorf("failed to apply Gateway check: %w", err), original, tr)
+		}
+
+		if !continueCheck {
+			break
+		}
+	}
+
+	if err := r.updateStatus(ctx, original, tr); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update TLSRoute status: %w", err)
 	}
 
 	scopedLog.Info("Successfully reconciled TLSRoute")
-	return success()
+	return controllerruntime.Success()
 }
 
 func (r *tlsRouteReconciler) updateStatus(ctx context.Context, original *gatewayv1alpha2.TLSRoute, new *gatewayv1alpha2.TLSRoute) error {
@@ -116,4 +139,12 @@ func (r *tlsRouteReconciler) updateStatus(ctx context.Context, original *gateway
 		return nil
 	}
 	return r.Client.Status().Update(ctx, new)
+}
+
+func (r *tlsRouteReconciler) handleReconcileErrorWithStatus(ctx context.Context, reconcileErr error, original *gatewayv1alpha2.TLSRoute, modified *gatewayv1alpha2.TLSRoute) (ctrl.Result, error) {
+	if err := r.updateStatus(ctx, original, modified); err != nil {
+		return controllerruntime.Fail(fmt.Errorf("failed to update TLSRoute status while handling the reconcile error %w: %w", reconcileErr, err))
+	}
+
+	return controllerruntime.Fail(reconcileErr)
 }

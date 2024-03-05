@@ -7,26 +7,22 @@ import (
 	"net"
 	"testing"
 
-	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
 
-	"github.com/cilium/cilium/pkg/datapath/loader"
 	"github.com/cilium/cilium/pkg/defaults"
-	"github.com/cilium/cilium/pkg/netns"
+	"github.com/cilium/cilium/pkg/mac"
 	"github.com/cilium/cilium/pkg/testutils"
+	"github.com/cilium/cilium/pkg/testutils/netns"
 )
 
 func Test_removeOldRouterState(t *testing.T) {
 	testutils.PrivilegedTest(t)
 
-	const netnsName = "test-daemon-priv-0"
-
 	t.Run("test-1", func(t *testing.T) {
-		netns0, clean := setupNetNS(t, netnsName)
-		defer clean()
+		ns := netns.NewNetNS(t)
 
-		netns0.Do(func(_ ns.NetNS) error {
+		ns.Do(func() error {
 			createDevices(t)
 
 			// Assert that the old router IP (192.0.2.1) was removed because we are
@@ -48,10 +44,9 @@ func Test_removeOldRouterState(t *testing.T) {
 	})
 
 	t.Run("test-2", func(t *testing.T) {
-		netns0, clean := setupNetNS(t, netnsName)
-		defer clean()
+		ns := netns.NewNetNS(t)
 
-		netns0.Do(func(_ ns.NetNS) error {
+		ns.Do(func() error {
 			createDevices(t)
 
 			// Remove the cilium_host device and assert no error on "link not found"
@@ -72,24 +67,26 @@ func Test_removeOldRouterState(t *testing.T) {
 func createDevices(t *testing.T) {
 	t.Helper()
 
-	ciliumHost, ciliumNet, err := loader.SetupBaseDevice(1500)
-	assert.NoError(t, err)
-	assert.NotNil(t, ciliumHost)
-	assert.NotNil(t, ciliumNet)
+	hostMac, err := mac.GenerateRandMAC()
+	if err != nil {
+		assert.NoError(t, err)
+	}
+	veth := &netlink.Dummy{
+		LinkAttrs: netlink.LinkAttrs{
+			Name:         defaults.HostDevice,
+			HardwareAddr: net.HardwareAddr(hostMac),
+			TxQLen:       1000,
+		},
+	}
+	if err := netlink.LinkAdd(veth); err != nil {
+		assert.NoError(t, err)
+	}
+	ciliumHost, err := netlink.LinkByName(defaults.HostDevice)
+	if err != nil {
+		assert.NoError(t, err)
+	}
 
 	_, ipnet, _ := net.ParseCIDR("192.0.2.1/32")
 	addr := &netlink.Addr{IPNet: ipnet}
 	assert.NoError(t, netlink.AddrAdd(ciliumHost, addr))
-}
-
-func setupNetNS(t *testing.T, netnsName string) (ns.NetNS, func()) {
-	t.Helper()
-
-	netns0, err := netns.ReplaceNetNSWithName(netnsName)
-	assert.NoError(t, err)
-	assert.NotNil(t, netns0)
-
-	return netns0, func() {
-		assert.NoError(t, netns.RemoveNetNSWithName(netnsName))
-	}
 }

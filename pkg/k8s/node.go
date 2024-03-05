@@ -11,6 +11,7 @@ import (
 	"github.com/cilium/cilium/pkg/annotation"
 	"github.com/cilium/cilium/pkg/cidr"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
+	"github.com/cilium/cilium/pkg/labelsfilter"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/node/addressing"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
@@ -134,8 +135,14 @@ func ParseNode(k8sNode *slim_corev1.Node, source source.Source) *nodeTypes.Node 
 		}
 	}
 
-	newNode.Labels = k8sNode.GetLabels()
-	newNode.Annotations = k8sNode.GetAnnotations()
+	newNode.Labels = labelsfilter.FilterLabelsByRegex(option.Config.ExcludeNodeLabelPatterns, k8sNode.GetLabels())
+	newNode.Annotations = make(map[string]string)
+	// Propagate only Cilium specific annotations.
+	for key, value := range k8sNode.GetAnnotations() {
+		if annotation.CiliumPrefixRegex.MatchString(key) {
+			newNode.Annotations[key] = value
+		}
+	}
 
 	if !option.Config.AnnotateK8sNode {
 		return newNode
@@ -161,6 +168,7 @@ func ParseNode(k8sNode *slim_corev1.Node, source source.Source) *nodeTypes.Node 
 
 	k8sNodeAddHostIP(annotation.CiliumHostIP, annotation.CiliumHostIPAlias)
 	k8sNodeAddHostIP(annotation.CiliumHostIPv6, annotation.CiliumHostIPv6Alias)
+	newNode.IPAddresses = addrs
 
 	if key, ok := annotation.Get(k8sNode, annotation.CiliumEncryptionKey, annotation.CiliumEncryptionKeyAlias); ok {
 		if u, err := strconv.ParseUint(key, 10, 8); err == nil {

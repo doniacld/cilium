@@ -5,46 +5,36 @@ package clustermesh
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"path"
-	"time"
-
-	"github.com/prometheus/client_golang/prometheus"
+	"errors"
 
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/allocator"
-	"github.com/cilium/cilium/pkg/clustermesh/types"
+	"github.com/cilium/cilium/pkg/clustermesh/common"
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
-	"github.com/cilium/cilium/pkg/controller"
-	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/hive/cell"
 	"github.com/cilium/cilium/pkg/ipcache"
+	"github.com/cilium/cilium/pkg/k8s"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
-	"github.com/cilium/cilium/pkg/lock"
-	"github.com/cilium/cilium/pkg/metrics"
+	"github.com/cilium/cilium/pkg/logging"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	serviceStore "github.com/cilium/cilium/pkg/service/store"
 )
 
-const (
-	// configNotificationsChannelSize is the size of the channel used to
-	// notify a clustermesh of configuration changes
-	configNotificationsChannelSize = 512
+const subsystem = "clustermesh"
 
-	subsystem = "clustermesh"
-)
+var log = logging.DefaultLogger.WithField(logfields.LogSubsys, subsystem)
 
 // Configuration is the configuration that must be provided to
 // NewClusterMesh()
 type Configuration struct {
 	cell.In
 
-	Config
+	common.Config
 
-	// ClusterIDName is the id/name of the local cluster. This is used for logging and metrics
-	types.ClusterIDName
+	// ClusterInfo is the id/name of the local cluster. This is used for logging and metrics
+	ClusterInfo cmtypes.ClusterInfo
 
 	// NodeKeyCreator is the function used to create node instances as
 	// nodes are being discovered in remote clusters
@@ -64,339 +54,171 @@ type Configuration struct {
 	IPCache ipcache.IPCacher
 
 	// ClusterSizeDependantInterval allows to calculate intervals based on cluster size.
-	ClusterSizeDependantInterval kvstore.ClusterSizeDependantIntervalFunc `optional:"true"`
-}
+	ClusterSizeDependantInterval kvstore.ClusterSizeDependantIntervalFunc
 
-func SetClusterConfig(ctx context.Context, clusterName string, config *cmtypes.CiliumClusterConfig, backend kvstore.BackendOperations) error {
-	key := path.Join(kvstore.ClusterConfigPrefix, clusterName)
+	// ServiceIPGetter, if not nil, is used to create a custom dialer for service resolution.
+	ServiceIPGetter k8s.ServiceIPGetter
 
-	val, err := json.Marshal(config)
-	if err != nil {
-		return err
-	}
+	// ConfigValidationMode defines whether the CiliumClusterConfig is always
+	// expected to be exposed by remote clusters.
+	ConfigValidationMode cmtypes.ValidationMode `optional:"true"`
 
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
+	// IPCacheWatcherExtraOpts returns extra options for watching ipcache entries.
+	IPCacheWatcherExtraOpts IPCacheWatcherOptsFn `optional:"true"`
 
-	_, err = backend.UpdateIfDifferent(ctx, key, val, true)
-	if err != nil {
-		return err
-	}
+	// ClusterIDsManager handles the reservation of the ClusterIDs associated
+	// with remote clusters, to ensure their uniqueness.
+	ClusterIDsManager clusterIDsManager
 
-	return nil
-}
-
-func GetClusterConfig(ctx context.Context, clusterName string, backend kvstore.BackendOperations) (*cmtypes.CiliumClusterConfig, error) {
-	var config cmtypes.CiliumClusterConfig
-
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-
-	val, err := backend.Get(ctx, path.Join(kvstore.ClusterConfigPrefix, clusterName))
-	if err != nil {
-		return nil, err
-	}
-
-	// Cluster configuration missing, but it's not an error
-	if val == nil {
-		return nil, nil
-	}
-
-	if err := json.Unmarshal(val, &config); err != nil {
-		return nil, err
-	}
-
-	return &config, nil
-}
-
-// IsClusterConfigRequired returns whether the remote kvstore guarantees that the
-// cilium cluster config will be eventually created.
-func IsClusterConfigRequired(ctx context.Context, backend kvstore.BackendOperations) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-
-	val, err := backend.Get(ctx, kvstore.HasClusterConfigPath)
-	return val != nil, err
+	Metrics       Metrics
+	CommonMetrics common.Metrics
+	StoreFactory  store.Factory
 }
 
 // RemoteIdentityWatcher is any type which provides identities that have been
 // allocated on a remote cluster.
 type RemoteIdentityWatcher interface {
-	// WatchRemoteIdentities starts watching for identities in another kvstore and
-	// syncs all identities to the local identity cache. RemoteName should be unique
-	// unless replacing an existing remote's backend.
-	WatchRemoteIdentities(remoteName string, backend kvstore.BackendOperations) (*allocator.RemoteCache, error)
+	// WatchRemoteIdentities returns a RemoteCache instance which can be later
+	// started to watch identities in another kvstore and sync them to the local
+	// identity cache. remoteName should be unique unless replacing an existing
+	// remote's backend. When cachedPrefix is set, identities are assumed to be
+	// stored under the "cilium/cache" prefix, and the watcher is adapted accordingly.
+	WatchRemoteIdentities(remoteName string, backend kvstore.BackendOperations, cachedPrefix bool) (*allocator.RemoteCache, error)
 
-	// RemoveRemoteIdentities removes any reference to a remote identity source.
+	// RemoveRemoteIdentities removes any reference to a remote identity source,
+	// emitting a deletion event for all previously known identities.
 	RemoveRemoteIdentities(name string)
-
-	// Close stops the watcher.
-	Close()
 }
+
+// IPCacheWatcherOptsFn is a function which returns extra options for watching
+// ipcache entries.
+type IPCacheWatcherOptsFn func(config *cmtypes.CiliumClusterConfig) []ipcache.IWOpt
 
 // ClusterMesh is a cache of multiple remote clusters
 type ClusterMesh struct {
 	// conf is the configuration, it is immutable after NewClusterMesh()
 	conf Configuration
 
-	mutex         lock.RWMutex
-	clusters      map[string]*remoteCluster
-	configWatcher *configDirectoryWatcher
+	// common implements the common logic to connect to remote clusters.
+	common common.ClusterMesh
 
 	// globalServices is a list of all global services. The datastructure
 	// is protected by its own mutex inside the structure.
-	globalServices *globalServiceCache
+	globalServices *common.GlobalServiceCache
 
 	// nodeName is the name of the local node. This is used for logging and metrics
 	nodeName string
-
-	// metricTotalRemoteClusters is gauge metric keeping track of total number
-	// of remote clusters.
-	metricTotalRemoteClusters *prometheus.GaugeVec
-
-	// metricLastFailureTimestamp is a gauge metric tracking the last failure timestamp
-	metricLastFailureTimestamp *prometheus.GaugeVec
-
-	// metricReadinessStatus is a gauge metric tracking the readiness status of a remote cluster
-	metricReadinessStatus *prometheus.GaugeVec
-
-	// metricTotalFailure is a gauge metric tracking the number of failures when connecting to a remote cluster
-	metricTotalFailures *prometheus.GaugeVec
-
-	// metricTotalNodes is a gauge metric tracking the number of total nodes in a remote cluster
-	metricTotalNodes *prometheus.GaugeVec
 }
 
 // NewClusterMesh creates a new remote cluster cache based on the
 // provided configuration
-func NewClusterMesh(lifecycle hive.Lifecycle, c Configuration) *ClusterMesh {
-	if c.ClusterID == 0 {
-		return nil
-	}
-
-	if c.ClusterMeshConfig == "" {
+func NewClusterMesh(lifecycle cell.Lifecycle, c Configuration) *ClusterMesh {
+	if c.ClusterInfo.ID == 0 || c.ClusterMeshConfig == "" {
 		return nil
 	}
 
 	nodeName := nodeTypes.GetName()
 	cm := &ClusterMesh{
-		conf:           c,
-		clusters:       map[string]*remoteCluster{},
-		globalServices: newGlobalServiceCache(c.ClusterName, nodeName),
-		nodeName:       nodeName,
-
-		metricTotalRemoteClusters: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: subsystem,
-			Name:      "remote_clusters",
-			Help:      "The total number of remote clusters meshed with the local cluster",
-		}, []string{metrics.LabelSourceCluster, metrics.LabelSourceNodeName}),
-
-		metricLastFailureTimestamp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: subsystem,
-			Name:      "remote_cluster_last_failure_ts",
-			Help:      "The timestamp of the last failure of the remote cluster",
-		}, []string{metrics.LabelSourceCluster, metrics.LabelSourceNodeName, metrics.LabelTargetCluster}),
-
-		metricReadinessStatus: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: subsystem,
-			Name:      "remote_cluster_readiness_status",
-			Help:      "The readiness status of the remote cluster",
-		}, []string{metrics.LabelSourceCluster, metrics.LabelSourceNodeName, metrics.LabelTargetCluster}),
-
-		metricTotalFailures: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: subsystem,
-			Name:      "remote_cluster_failures",
-			Help:      "The total number of failures related to the remote cluster",
-		}, []string{metrics.LabelSourceCluster, metrics.LabelSourceNodeName, metrics.LabelTargetCluster}),
-
-		metricTotalNodes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: subsystem,
-			Name:      "remote_cluster_nodes",
-			Help:      "The total number of nodes in the remote cluster",
-		}, []string{metrics.LabelSourceCluster, metrics.LabelSourceNodeName, metrics.LabelTargetCluster}),
+		conf:     c,
+		nodeName: nodeName,
+		globalServices: common.NewGlobalServiceCache(
+			c.Metrics.TotalGlobalServices.WithLabelValues(c.ClusterInfo.Name, nodeName),
+		),
 	}
 
-	lifecycle.Append(cm)
+	cm.common = common.NewClusterMesh(common.Configuration{
+		Config:                       c.Config,
+		ClusterInfo:                  c.ClusterInfo,
+		ClusterSizeDependantInterval: c.ClusterSizeDependantInterval,
+		ServiceIPGetter:              c.ServiceIPGetter,
+
+		NewRemoteCluster: cm.NewRemoteCluster,
+
+		NodeName: nodeName,
+		Metrics:  c.CommonMetrics,
+	})
+
+	lifecycle.Append(&cm.common)
 	return cm
 }
 
-func (cm *ClusterMesh) Start(hive.HookContext) error {
-	w, err := createConfigDirectoryWatcher(cm.conf.ClusterMeshConfig, cm)
-	if err != nil {
-		return fmt.Errorf("unable to create config directory watcher: %w", err)
-	}
-
-	cm.configWatcher = w
-
-	if err := cm.configWatcher.watch(); err != nil {
-		return fmt.Errorf("unable to start config directory watcher: %w", err)
-	}
-
-	_ = metrics.RegisterList([]prometheus.Collector{
-		cm.metricTotalRemoteClusters,
-		cm.metricLastFailureTimestamp,
-		cm.metricReadinessStatus,
-		cm.metricTotalFailures,
-		cm.metricTotalNodes,
-	})
-
-	return nil
-}
-
-// Close stops watching for remote cluster configuration files to appear and
-// will close all connections to remote clusters
-func (cm *ClusterMesh) Stop(hive.HookContext) error {
-	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
-
-	if cm.configWatcher != nil {
-		cm.configWatcher.close()
-	}
-
-	for name, cluster := range cm.clusters {
-		cluster.onStop()
-		delete(cm.clusters, name)
-	}
-
-	metrics.Unregister(cm.metricTotalRemoteClusters)
-	metrics.Unregister(cm.metricLastFailureTimestamp)
-	metrics.Unregister(cm.metricReadinessStatus)
-	metrics.Unregister(cm.metricTotalFailures)
-	metrics.Unregister(cm.metricTotalNodes)
-
-	return nil
-}
-
-func (cm *ClusterMesh) newRemoteCluster(name, path string) *remoteCluster {
+func (cm *ClusterMesh) NewRemoteCluster(name string, status common.StatusFunc) common.RemoteCluster {
 	rc := &remoteCluster{
-		name:        name,
-		configPath:  path,
-		mesh:        cm,
-		changed:     make(chan bool, configNotificationsChannelSize),
-		controllers: controller.NewManager(),
-		swg:         lock.NewStoppableWaitGroup(),
+		name:         name,
+		mesh:         cm,
+		usedIDs:      cm.conf.ClusterIDsManager,
+		status:       status,
+		storeFactory: cm.conf.StoreFactory,
+		synced:       newSynced(),
 	}
-
-	rc.remoteNodes = store.NewRestartableWatchStore(
+	rc.remoteNodes = cm.conf.StoreFactory.NewWatchStore(
 		name,
 		cm.conf.NodeKeyCreator,
 		cm.conf.NodeObserver,
-		store.RWSWithEntriesMetric(rc.mesh.metricTotalNodes.WithLabelValues(rc.mesh.conf.ClusterName, rc.mesh.nodeName, rc.name)),
+		store.RWSWithOnSyncCallback(func(ctx context.Context) { close(rc.synced.nodes) }),
+		store.RWSWithEntriesMetric(cm.conf.Metrics.TotalNodes.WithLabelValues(cm.conf.ClusterInfo.Name, cm.nodeName, rc.name)),
 	)
 
-	rc.remoteServices = store.NewRestartableWatchStore(
+	rc.remoteServices = cm.conf.StoreFactory.NewWatchStore(
 		name,
 		func() store.Key { return new(serviceStore.ClusterService) },
-		&remoteServiceObserver{remoteCluster: rc, swg: rc.swg},
-		store.RWSWithOnSyncCallback(func(ctx context.Context) { rc.swg.Stop() }),
+		&remoteServiceObserver{remoteCluster: rc, swg: rc.synced.services},
+		store.RWSWithOnSyncCallback(func(ctx context.Context) { rc.synced.services.Stop() }),
 	)
 
+	rc.ipCacheWatcher = ipcache.NewIPIdentityWatcher(
+		name, cm.conf.IPCache, cm.conf.StoreFactory,
+		store.RWSWithOnSyncCallback(func(ctx context.Context) { close(rc.synced.ipcache) }),
+	)
+	rc.ipCacheWatcherExtraOpts = cm.conf.IPCacheWatcherExtraOpts
+
 	return rc
-}
-
-func (cm *ClusterMesh) add(name, path string) {
-	if name == cm.conf.ClusterName {
-		log.WithField(fieldClusterName, name).Debug("Ignoring configuration for own cluster")
-		return
-	}
-
-	inserted := false
-	cm.mutex.Lock()
-	cluster, ok := cm.clusters[name]
-	if !ok {
-		cluster = cm.newRemoteCluster(name, path)
-		cm.clusters[name] = cluster
-		inserted = true
-	}
-
-	cm.metricTotalRemoteClusters.WithLabelValues(cm.conf.ClusterName, cm.nodeName).Set(float64(len(cm.clusters)))
-	cm.mutex.Unlock()
-
-	log.WithField(fieldClusterName, name).Debug("Remote cluster configuration added")
-
-	if inserted {
-		cluster.onInsert(cm.conf.RemoteIdentityWatcher)
-	} else {
-		// signal a change in configuration
-		cluster.changed <- true
-	}
-}
-
-func (cm *ClusterMesh) remove(name string) {
-	cm.mutex.Lock()
-	if cluster, ok := cm.clusters[name]; ok {
-		cluster.onRemove()
-		delete(cm.clusters, name)
-		cm.metricTotalRemoteClusters.WithLabelValues(cm.conf.ClusterName, cm.nodeName).Set(float64(len(cm.clusters)))
-		cm.globalServices.onClusterDelete(name)
-	}
-	cm.mutex.Unlock()
-
-	log.WithField(fieldClusterName, name).Debug("Remote cluster configuration removed")
 }
 
 // NumReadyClusters returns the number of remote clusters to which a connection
 // has been established
 func (cm *ClusterMesh) NumReadyClusters() int {
-	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
-
-	nready := 0
-	for _, cm := range cm.clusters {
-		if cm.isReady() {
-			nready++
-		}
-	}
-
-	return nready
+	return cm.common.NumReadyClusters()
 }
 
-func (cm *ClusterMesh) canConnect(name string, config *cmtypes.CiliumClusterConfig) error {
-	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
+// SyncedWaitFn is the type of a function to wait for the initial synchronization
+// of a given resource type from all remote clusters.
+type SyncedWaitFn func(ctx context.Context) error
 
-	for n, rc := range cm.clusters {
-		if err := func() error {
-			rc.mutex.RLock()
-			defer rc.mutex.RUnlock()
-
-			if rc.name == name || !rc.isReadyLocked() || rc.config == nil {
-				return nil
-			}
-
-			if err := rc.config.IsCompatible(config); err != nil {
-				return err
-			}
-
-			return nil
-		}(); err != nil {
-			return fmt.Errorf("configuration of %s is not compatible with %s: %w", name, n, err)
-		}
-	}
-
-	return nil
+// NodesSynced returns after that the initial list of nodes has been received
+// from all remote clusters, and synchronized with the different subscribers.
+func (cm *ClusterMesh) NodesSynced(ctx context.Context) error {
+	return cm.synced(ctx, func(rc *remoteCluster) SyncedWaitFn { return rc.synced.Nodes })
 }
 
-// ClustersSynced returns after all clusters were synchronized with the bpf
-// datapath.
-func (cm *ClusterMesh) ClustersSynced(ctx context.Context) error {
-	cm.mutex.RLock()
-	swgs := make([]*lock.StoppableWaitGroup, 0, len(cm.clusters))
-	for _, cluster := range cm.clusters {
-		swgs = append(swgs, cluster.swg)
-	}
-	cm.mutex.RUnlock()
+// ServicesSynced returns after that the initial list of shared services has been
+// received from all remote clusters, and synchronized with the BPF datapath.
+func (cm *ClusterMesh) ServicesSynced(ctx context.Context) error {
+	return cm.synced(ctx, func(rc *remoteCluster) SyncedWaitFn { return rc.synced.Services })
+}
 
-	for _, swg := range swgs {
-		select {
-		case <-swg.WaitChannel():
-		case <-ctx.Done():
-			return ctx.Err()
+// IPIdentitiesSynced returns after that the initial list of ipcache entries and
+// identities has been received from all remote clusters, and synchronized with
+// the BPF datapath.
+func (cm *ClusterMesh) IPIdentitiesSynced(ctx context.Context) error {
+	return cm.synced(ctx, func(rc *remoteCluster) SyncedWaitFn { return rc.synced.IPIdentities })
+}
+
+func (cm *ClusterMesh) synced(ctx context.Context, toWaitFn func(*remoteCluster) SyncedWaitFn) error {
+	waiters := make([]SyncedWaitFn, 0)
+	cm.common.ForEachRemoteCluster(func(rci common.RemoteCluster) error {
+		rc := rci.(*remoteCluster)
+		waiters = append(waiters, toWaitFn(rc))
+		return nil
+	})
+
+	for _, wait := range waiters {
+		err := wait(ctx)
+
+		// Ignore the error in case the given cluster was disconnected in
+		// the meanwhile, as we do not longer care about it.
+		if err != nil && !errors.Is(err, ErrRemoteClusterDisconnected) {
+			return err
 		}
 	}
 	return nil
@@ -404,16 +226,15 @@ func (cm *ClusterMesh) ClustersSynced(ctx context.Context) error {
 
 // Status returns the status of the ClusterMesh subsystem
 func (cm *ClusterMesh) Status() (status *models.ClusterMeshStatus) {
-	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
-
 	status = &models.ClusterMeshStatus{
-		NumGlobalServices: int64(cm.globalServices.size()),
+		NumGlobalServices: int64(cm.globalServices.Size()),
 	}
 
-	for _, cm := range cm.clusters {
-		status.Clusters = append(status.Clusters, cm.status())
-	}
+	cm.common.ForEachRemoteCluster(func(rci common.RemoteCluster) error {
+		rc := rci.(*remoteCluster)
+		status.Clusters = append(status.Clusters, rc.Status())
+		return nil
+	})
 
 	return
 }

@@ -38,10 +38,9 @@ each other via that port.
 
 .. note::
 
-   When running in the tunneling mode (i.e. with VXLAN or Geneve), pod to pod
-   traffic will be sent only over the WireGuard tunnel which means that the
-   packets will bypass the other tunnel, and thus they will be encapsulated
-   only once.
+   When running in tunnel routing mode, pod to pod traffic is encapsulated twice.
+   It is first sent to the VXLAN / Geneve tunnel interface, and then subsequently
+   also encapsulated by the WireGuard tunnel.
 
 Enable WireGuard in Cilium
 ==========================
@@ -72,9 +71,11 @@ production workloads that require high availability.
        If you are deploying Cilium with the Cilium CLI, pass the following
        options:
 
-       .. code-block:: shell-session
+       .. parsed-literal::
 
-          cilium install --encryption wireguard
+          cilium install |CHART_VERSION| \
+             --set encryption.enabled=true \
+             --set encryption.type=wireguard
 
     .. group-tab:: Helm
 
@@ -104,7 +105,7 @@ commands:
 
    .. code-block:: shell-session
 
-      cilium status | grep Encryption
+      cilium-dbg status | grep Encryption
 
       Encryption: Wireguard [cilium_wg0 (Pubkey: <..>, Port: 51871, Peers: 2)]
 
@@ -145,7 +146,7 @@ commands can be helpful:
 .. code-block:: shell-session
 
    # From node A:
-   cilium debuginfo --output json | jq .encryption
+   cilium-dbg debuginfo --output json | jq .encryption
    {
      "wireguard": {
        "interfaces": [
@@ -170,7 +171,7 @@ commands can be helpful:
      }
    }
    # From node B:
-   cilium debuginfo --output json | jq .encryption
+   cilium-dbg debuginfo --output json | jq .encryption
    {
      "wireguard": {
        "interfaces": [
@@ -215,6 +216,8 @@ have WireGuard encryption enabled, i.e. mixed mode is currently not supported.
 In addition, UDP traffic between nodes of different clusters on port ``51871``
 must be allowed.
 
+.. _node-node-wg:
+
 Node-to-Node Encryption (beta)
 ==============================
 
@@ -230,9 +233,12 @@ options:
        If you are deploying Cilium with the Cilium CLI, pass the following
        options:
 
-       .. code-block:: shell-session
+       .. parsed-literal::
 
-          cilium install --encryption wireguard --node-encryption
+          cilium install |CHART_VERSION| \
+             --set encryption.enabled=true \
+             --set encryption.type=wireguard \
+             --set encryption.nodeEncryption=true
 
     .. group-tab:: Helm
 
@@ -282,6 +288,12 @@ options:
   recommended, as it will require you to always manually update a node's public
   key in its corresponding ``CiliumNode`` CRD when a worker node's public key
   changes, given that the worker node will be unable to do so itself.
+
+  N/S load balancer traffic isn't encrypted when an intermediate node redirects
+  a request to a different node with the following load balancer configuration:
+
+  - LoadBalancer & NodePort XDP Acceleration
+  - Direct Server Return (DSR)
 
 Legal
 =====

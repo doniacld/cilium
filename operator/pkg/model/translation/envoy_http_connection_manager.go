@@ -4,10 +4,14 @@
 package translation
 
 import (
+	envoy_config_core "github.com/cilium/proxy/go/envoy/config/core/v3"
+	grpcStatsv3 "github.com/cilium/proxy/go/envoy/extensions/filters/http/grpc_stats/v3"
+	grpcWebv3 "github.com/cilium/proxy/go/envoy/extensions/filters/http/grpc_web/v3"
 	httpRouterv3 "github.com/cilium/proxy/go/envoy/extensions/filters/http/router/v3"
 	httpConnectionManagerv3 "github.com/cilium/proxy/go/envoy/extensions/filters/network/http_connection_manager/v3"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/cilium/cilium/pkg/envoy"
@@ -28,6 +32,21 @@ func NewHTTPConnectionManager(name, routeName string, mutationFunc ...HttpConnec
 		SkipXffAppend:    false,
 		HttpFilters: []*httpConnectionManagerv3.HttpFilter{
 			{
+				Name: "envoy.filters.http.grpc_web",
+				ConfigType: &httpConnectionManagerv3.HttpFilter_TypedConfig{
+					TypedConfig: toAny(&grpcWebv3.GrpcWeb{}),
+				},
+			},
+			{
+				Name: "envoy.filters.http.grpc_stats",
+				ConfigType: &httpConnectionManagerv3.HttpFilter_TypedConfig{
+					TypedConfig: toAny(&grpcStatsv3.FilterConfig{
+						EmitFilterState:     true,
+						EnableUpstreamStats: true,
+					}),
+				},
+			},
+			{
 				Name: "envoy.filters.http.router",
 				ConfigType: &httpConnectionManagerv3.HttpFilter_TypedConfig{
 					TypedConfig: toAny(&httpRouterv3.Router{}),
@@ -36,6 +55,11 @@ func NewHTTPConnectionManager(name, routeName string, mutationFunc ...HttpConnec
 		},
 		UpgradeConfigs: []*httpConnectionManagerv3.HttpConnectionManager_UpgradeConfig{
 			{UpgradeType: "websocket"},
+		},
+		CommonHttpProtocolOptions: &envoy_config_core.HttpProtocolOptions{
+			MaxStreamDuration: &durationpb.Duration{
+				Seconds: 0,
+			},
 		},
 	}
 

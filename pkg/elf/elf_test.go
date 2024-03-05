@@ -26,7 +26,7 @@ type ELFTestSuite struct{}
 var _ = Suite(&ELFTestSuite{})
 
 func (s *ELFTestSuite) SetUpSuite(c *C) {
-	testutils.IntegrationCheck(c)
+	testutils.IntegrationTest(c)
 }
 
 var baseObjPath = filepath.Join("..", "..", "test", "bpf", "elf-demo.o")
@@ -235,7 +235,7 @@ func (elf *ELF) findString(key string) error {
 }
 
 func (elf *ELF) readOption(key string) (result uint64, err error) {
-	opt, exists := elf.symbols.data[key]
+	opt, exists := elf.symbols.data[configPrefix+key]
 	if !exists {
 		return 0, fmt.Errorf("no such option %q in ELF", key)
 	}
@@ -250,7 +250,7 @@ func (elf *ELF) readOption(key string) (result uint64, err error) {
 }
 
 func (elf *ELF) readValue(offset int64, size int64) ([]byte, error) {
-	reader := io.NewSectionReader(elf.file, offset, size)
+	reader := io.NewSectionReader(elf.contents, offset, size)
 	result := make([]byte, size)
 	if err := binary.Read(reader, elf.metadata.ByteOrder, &result); err != nil {
 		return nil, err

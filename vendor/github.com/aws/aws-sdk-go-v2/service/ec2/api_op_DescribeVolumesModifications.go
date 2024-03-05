@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -17,10 +16,8 @@ import (
 // will be null. If a volume has been modified more than once, the output includes
 // only the most recent modification request. You can also use CloudWatch Events to
 // check the status of a modification to an EBS volume. For information about
-// CloudWatch Events, see the Amazon CloudWatch Events User Guide
-// (https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/). For more
-// information, see Monitor the progress of volume modifications
-// (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/monitoring-volume-modifications.html)
+// CloudWatch Events, see the Amazon CloudWatch Events User Guide (https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/)
+// . For more information, see Monitor the progress of volume modifications (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/monitoring-volume-modifications.html)
 // in the Amazon Elastic Compute Cloud User Guide.
 func (c *Client) DescribeVolumesModifications(ctx context.Context, params *DescribeVolumesModificationsInput, optFns ...func(*Options)) (*DescribeVolumesModificationsOutput, error) {
 	if params == nil {
@@ -41,50 +38,36 @@ type DescribeVolumesModificationsInput struct {
 
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	// The filters.
-	//
-	// * modification-state - The current modification state (modifying |
-	// optimizing | completed | failed).
-	//
-	// * original-iops - The original IOPS rate of
-	// the volume.
-	//
-	// * original-size - The original size of the volume, in GiB.
-	//
-	// *
-	// original-volume-type - The original volume type of the volume (standard | io1 |
-	// io2 | gp2 | sc1 | st1).
-	//
-	// * originalMultiAttachEnabled - Indicates whether
-	// Multi-Attach support was enabled (true | false).
-	//
-	// * start-time - The
-	// modification start time.
-	//
-	// * target-iops - The target IOPS rate of the volume.
-	//
-	// *
-	// target-size - The target size of the volume, in GiB.
-	//
-	// * target-volume-type - The
-	// target volume type of the volume (standard | io1 | io2 | gp2 | sc1 | st1).
-	//
-	// *
-	// targetMultiAttachEnabled - Indicates whether Multi-Attach support is to be
-	// enabled (true | false).
-	//
-	// * volume-id - The ID of the volume.
+	//   - modification-state - The current modification state (modifying | optimizing
+	//   | completed | failed).
+	//   - original-iops - The original IOPS rate of the volume.
+	//   - original-size - The original size of the volume, in GiB.
+	//   - original-volume-type - The original volume type of the volume (standard |
+	//   io1 | io2 | gp2 | sc1 | st1).
+	//   - originalMultiAttachEnabled - Indicates whether Multi-Attach support was
+	//   enabled (true | false).
+	//   - start-time - The modification start time.
+	//   - target-iops - The target IOPS rate of the volume.
+	//   - target-size - The target size of the volume, in GiB.
+	//   - target-volume-type - The target volume type of the volume (standard | io1 |
+	//   io2 | gp2 | sc1 | st1).
+	//   - targetMultiAttachEnabled - Indicates whether Multi-Attach support is to be
+	//   enabled (true | false).
+	//   - volume-id - The ID of the volume.
 	Filters []types.Filter
 
 	// The maximum number of results (up to a limit of 500) to be returned in a
-	// paginated request.
+	// paginated request. For more information, see Pagination (https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Query-Requests.html#api-pagination)
+	// .
 	MaxResults *int32
 
-	// The nextToken value returned by a previous paginated request.
+	// The token returned by a previous paginated request. Pagination continues from
+	// the end of the items returned by the previous request.
 	NextToken *string
 
 	// The IDs of the volumes.
@@ -95,7 +78,8 @@ type DescribeVolumesModificationsInput struct {
 
 type DescribeVolumesModificationsOutput struct {
 
-	// Token for pagination, null if there are no more results
+	// The token to include in another request to get the next page of items. This
+	// value is null if there are no more items to return.
 	NextToken *string
 
 	// Information about the volume modifications.
@@ -108,6 +92,9 @@ type DescribeVolumesModificationsOutput struct {
 }
 
 func (c *Client) addOperationDescribeVolumesModificationsMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeVolumesModifications{}, middleware.After)
 	if err != nil {
 		return err
@@ -116,34 +103,38 @@ func (c *Client) addOperationDescribeVolumesModificationsMiddlewares(stack *midd
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeVolumesModifications"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -152,7 +143,13 @@ func (c *Client) addOperationDescribeVolumesModificationsMiddlewares(stack *midd
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeVolumesModifications(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -162,6 +159,9 @@ func (c *Client) addOperationDescribeVolumesModificationsMiddlewares(stack *midd
 		return err
 	}
 	if err = addRequestResponseLogging(stack, options); err != nil {
+		return err
+	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
 	return nil
@@ -179,7 +179,8 @@ var _ DescribeVolumesModificationsAPIClient = (*Client)(nil)
 // DescribeVolumesModifications
 type DescribeVolumesModificationsPaginatorOptions struct {
 	// The maximum number of results (up to a limit of 500) to be returned in a
-	// paginated request.
+	// paginated request. For more information, see Pagination (https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Query-Requests.html#api-pagination)
+	// .
 	Limit int32
 
 	// Set to true if pagination should stop if the service returns a pagination token
@@ -265,7 +266,6 @@ func newServiceMetadataMiddleware_opDescribeVolumesModifications(region string) 
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeVolumesModifications",
 	}
 }

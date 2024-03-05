@@ -4,8 +4,8 @@ package ec2
 
 import (
 	"context"
+	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"time"
@@ -13,11 +13,9 @@ import (
 
 // Restores an archived Amazon EBS snapshot for use temporarily or permanently, or
 // modifies the restore period or restore type for a snapshot that was previously
-// temporarily restored. For more information see  Restore an archived snapshot
-// (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/working-with-snapshot-archiving.html#restore-archived-snapshot)
-// and  modify the restore period or restore type for a temporarily restored
-// snapshot
-// (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/working-with-snapshot-archiving.html#modify-temp-restore-period)
+// temporarily restored. For more information see Restore an archived snapshot (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/working-with-snapshot-archiving.html#restore-archived-snapshot)
+// and modify the restore period or restore type for a temporarily restored
+// snapshot (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/working-with-snapshot-archiving.html#modify-temp-restore-period)
 // in the Amazon Elastic Compute Cloud User Guide.
 func (c *Client) RestoreSnapshotTier(ctx context.Context, params *RestoreSnapshotTierInput, optFns ...func(*Options)) (*RestoreSnapshotTierOutput, error) {
 	if params == nil {
@@ -43,8 +41,8 @@ type RestoreSnapshotTierInput struct {
 
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	// Indicates whether to permanently restore an archived snapshot. To permanently
@@ -56,7 +54,7 @@ type RestoreSnapshotTierInput struct {
 	// snapshot. Required for temporary restores only. The snapshot will be
 	// automatically re-archived after this period. To temporarily restore an archived
 	// snapshot, specify the number of days and omit the PermanentRestore parameter or
-	// set it to false.
+	// set it to false .
 	TemporaryRestoreDays *int32
 
 	noSmithyDocumentSerde
@@ -85,6 +83,9 @@ type RestoreSnapshotTierOutput struct {
 }
 
 func (c *Client) addOperationRestoreSnapshotTierMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpRestoreSnapshotTier{}, middleware.After)
 	if err != nil {
 		return err
@@ -93,34 +94,38 @@ func (c *Client) addOperationRestoreSnapshotTierMiddlewares(stack *middleware.St
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "RestoreSnapshotTier"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -129,10 +134,16 @@ func (c *Client) addOperationRestoreSnapshotTierMiddlewares(stack *middleware.St
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = addOpRestoreSnapshotTierValidationMiddleware(stack); err != nil {
 		return err
 	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opRestoreSnapshotTier(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -144,6 +155,9 @@ func (c *Client) addOperationRestoreSnapshotTierMiddlewares(stack *middleware.St
 	if err = addRequestResponseLogging(stack, options); err != nil {
 		return err
 	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -151,7 +165,6 @@ func newServiceMetadataMiddleware_opRestoreSnapshotTier(region string) *awsmiddl
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "RestoreSnapshotTier",
 	}
 }

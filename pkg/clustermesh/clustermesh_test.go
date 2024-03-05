@@ -9,37 +9,25 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sync"
 	"testing"
-	"time"
 
-	. "github.com/cilium/checkmate"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/cilium/cilium/pkg/clustermesh/common"
 	"github.com/cilium/cilium/pkg/clustermesh/types"
-	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
+	cmutils "github.com/cilium/cilium/pkg/clustermesh/utils"
 	"github.com/cilium/cilium/pkg/hive/hivetest"
-	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/ipcache"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/lock"
 	nodeStore "github.com/cilium/cilium/pkg/node/store"
-	fakeConfig "github.com/cilium/cilium/pkg/option/fake"
 	"github.com/cilium/cilium/pkg/testutils"
 	testidentity "github.com/cilium/cilium/pkg/testutils/identity"
 )
-
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-type ClusterMeshTestSuite struct{}
-
-var _ = Suite(&ClusterMeshTestSuite{})
-
-func (s *ClusterMeshTestSuite) SetUpSuite(c *C) {
-	testutils.IntegrationCheck(c)
-}
 
 var (
 	nodes      = map[string]*testNode{}
@@ -94,28 +82,24 @@ func (o *testObserver) OnDelete(k store.NamedKey) {
 	nodesMutex.Unlock()
 }
 
-func (s *ClusterMeshTestSuite) TestClusterMesh(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func TestClusterMesh(t *testing.T) {
+	testutils.IntegrationTest(t)
 
-	kvstore.SetupDummy("etcd")
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
-		kvstore.Client().DeletePrefix(context.TODO(), kvstore.ClusterConfigPrefix)
-		kvstore.Client().DeletePrefix(context.TODO(), kvstore.SyncedPrefix)
-		kvstore.Client().DeletePrefix(context.TODO(), nodeStore.NodeStorePrefix)
-		kvstore.Client().Close(ctx)
+		cancel()
+		wg.Wait()
 	}()
 
-	identity.InitWellKnownIdentities(&fakeConfig.Config{})
+	kvstore.SetupDummy(t, "etcd")
+
 	// The nils are only used by k8s CRD identities. We default to kvstore.
 	mgr := cache.NewCachingIdentityAllocator(&testidentity.IdentityAllocatorOwnerMock{})
 	<-mgr.InitIdentityAllocator(nil)
-	defer mgr.Close()
+	t.Cleanup(mgr.Close)
 
-	dir, err := os.MkdirTemp("", "multicluster")
-	c.Assert(err, IsNil)
-	defer os.RemoveAll(dir)
-
+	dir := t.TempDir()
 	etcdConfig := []byte(fmt.Sprintf("endpoints:\n- %s\n", kvstore.EtcdDummyAddress()))
 
 	// cluster3 doesn't have cluster configuration on kvstore. This emulates
@@ -123,8 +107,11 @@ func (s *ClusterMeshTestSuite) TestClusterMesh(c *C) {
 	// feature. We should be able to connect to such a cluster for
 	// compatibility.
 	for i, name := range []string{"test2", "cluster1", "cluster2"} {
-		config := cmtypes.CiliumClusterConfig{
-			ID: uint32(i),
+		config := types.CiliumClusterConfig{
+			ID: uint32(i + 1),
+			Capabilities: types.CiliumClusterConfigCapabilities{
+				MaxConnectedClusters: 255,
+			},
 		}
 
 		if name == "cluster2" {
@@ -132,96 +119,145 @@ func (s *ClusterMeshTestSuite) TestClusterMesh(c *C) {
 			config.Capabilities.SyncedCanaries = true
 		}
 
-		err = SetClusterConfig(ctx, name, &config, kvstore.Client())
-		c.Assert(err, IsNil)
+		err := cmutils.SetClusterConfig(ctx, name, &config, kvstore.Client())
+		require.NoErrorf(t, err, "Failed to set cluster config for %s", name)
 	}
 
 	config1 := path.Join(dir, "cluster1")
-	err = os.WriteFile(config1, etcdConfig, 0644)
-	c.Assert(err, IsNil)
+	require.NoError(t, os.WriteFile(config1, etcdConfig, 0644), "Failed to write config file for cluster1")
 
 	config2 := path.Join(dir, "cluster2")
-	err = os.WriteFile(config2, etcdConfig, 0644)
-	c.Assert(err, IsNil)
+	require.NoError(t, os.WriteFile(config2, etcdConfig, 0644), "Failed to write config file for cluster2")
 
 	config3 := path.Join(dir, "cluster3")
-	err = os.WriteFile(config3, etcdConfig, 0644)
-	c.Assert(err, IsNil)
+	require.NoError(t, os.WriteFile(config3, etcdConfig, 0644), "Failed to write config file for cluster3")
 
 	ipc := ipcache.NewIPCache(&ipcache.Configuration{
 		Context: ctx,
 	})
-	defer ipc.Shutdown()
+	t.Cleanup(func() { ipc.Shutdown() })
 
-	cm := NewClusterMesh(hivetest.Lifecycle(c), Configuration{
-		Config: Config{ClusterMeshConfig: dir},
-
-		ClusterIDName:         types.ClusterIDName{ClusterID: 255, ClusterName: "test2"},
+	usedIDs := NewClusterMeshUsedIDs()
+	storeFactory := store.NewFactory(store.MetricsProvider())
+	cm := NewClusterMesh(hivetest.Lifecycle(t), Configuration{
+		Config:                common.Config{ClusterMeshConfig: dir},
+		ClusterInfo:           types.ClusterInfo{ID: 255, Name: "test2", MaxConnectedClusters: 255},
 		NodeKeyCreator:        testNodeCreator,
 		NodeObserver:          &testObserver{},
 		RemoteIdentityWatcher: mgr,
 		IPCache:               ipc,
+		ClusterIDsManager:     usedIDs,
+		Metrics:               NewMetrics(),
+		CommonMetrics:         common.MetricsProvider(subsystem)(),
+		StoreFactory:          storeFactory,
 	})
-	c.Assert(cm, Not(IsNil))
-
-	nodesWSS := store.NewWorkqueueSyncStore(kvstore.Client(), nodeStore.NodeStorePrefix,
-		store.WSSWithSourceClusterName("cluster2"), // The one which is tested with sync canaries
-	)
-	go nodesWSS.Run(ctx)
+	require.NotNil(t, cm, "Failed to initialize clustermesh")
+	// cluster2 is the cluster which is tested with sync canaries
+	nodesWSS := storeFactory.NewSyncStore("cluster2", kvstore.Client(), nodeStore.NodeStorePrefix)
+	wg.Add(1)
+	go func() {
+		nodesWSS.Run(ctx)
+		wg.Done()
+	}()
 	nodeNames := []string{"foo", "bar", "baz"}
 
 	// wait for all clusters to appear in the list of cm clusters
-	c.Assert(testutils.WaitUntil(func() bool {
-		return cm.NumReadyClusters() == 3
-	}, 10*time.Second), IsNil)
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		assert.Equal(c, 3, cm.NumReadyClusters())
+	}, timeout, tick, "Clusters did not become ready in time")
 
-	cm.mutex.RLock()
-	for _, rc := range cm.clusters {
-		rc.mutex.RLock()
-		for _, name := range nodeNames {
-			nodesWSS.UpsertKey(ctx, &testNode{Name: name, Cluster: rc.name})
-			c.Assert(err, IsNil)
-		}
-		rc.mutex.RUnlock()
+	// Ensure that ClusterIDs are reserved correctly after connect
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		usedIDs.UsedClusterIDsMutex.Lock()
+		defer usedIDs.UsedClusterIDsMutex.Unlock()
+
+		assert.Contains(c, usedIDs.UsedClusterIDs, uint32(2))
+		assert.Contains(c, usedIDs.UsedClusterIDs, uint32(3))
+		// cluster3 doesn't have config, so only 2 IDs should be reserved
+		assert.Len(c, usedIDs.UsedClusterIDs, 2)
+	}, timeout, tick, "Cluster IDs were not reserved correctly")
+
+	// Reconnect cluster with changed ClusterID
+	config := types.CiliumClusterConfig{
+		ID: 255,
+		Capabilities: types.CiliumClusterConfigCapabilities{
+			MaxConnectedClusters: 255,
+		},
 	}
-	cm.mutex.RUnlock()
+	err := cmutils.SetClusterConfig(ctx, "cluster1", &config, kvstore.Client())
+	require.NoErrorf(t, err, "Failed to set cluster config for cluster1")
+	// Ugly hack to trigger config update
+	etcdConfigNew := append(etcdConfig, []byte("\n")...)
+	require.NoError(t, os.WriteFile(config1, etcdConfigNew, 0644), "Failed to write config file for cluster1")
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		usedIDs.UsedClusterIDsMutex.Lock()
+		defer usedIDs.UsedClusterIDsMutex.Unlock()
+
+		// Ensure if old ClusterID for cluster1 is released
+		// and new ClusterID is reserved.
+		assert.NotContains(c, usedIDs.UsedClusterIDs, uint32(2))
+		assert.Contains(c, usedIDs.UsedClusterIDs, uint32(255))
+	}, timeout, tick, "Reserved cluster IDs not updated correctly")
+
+	for _, cluster := range []string{"cluster1", "cluster2", "cluster3"} {
+		for _, name := range nodeNames {
+			require.NoErrorf(t, nodesWSS.UpsertKey(ctx, &testNode{Name: name, Cluster: cluster}),
+				"Failed upserting node %s/%s into kvstore", cluster, name)
+		}
+	}
 
 	// Write the sync canary for cluster2
-	nodesWSS.Synced(ctx)
+	require.NoError(t, nodesWSS.Synced(ctx), "Failed writing the synched key into kvstore")
 
 	// wait for all cm nodes in both clusters to appear in the node list
-	c.Assert(testutils.WaitUntil(func() bool {
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		nodesMutex.RLock()
 		defer nodesMutex.RUnlock()
-		return len(nodes) == 3*len(nodeNames)
-	}, 10*time.Second), IsNil)
+		assert.Len(c, nodes, 3*len(nodeNames))
+	}, timeout, tick, "Nodes not watched correctly")
 
-	os.RemoveAll(config2)
+	require.NoError(t, os.Remove(config2), "Failed to remove config file for cluster2")
 
 	// wait for the removed cluster to disappear
-	c.Assert(testutils.WaitUntil(func() bool {
-		return cm.NumReadyClusters() == 2
-	}, 5*time.Second), IsNil)
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		assert.Equal(c, 2, cm.NumReadyClusters())
+	}, timeout, tick, "Cluster2 was not correctly removed")
+
+	// Make sure that ID is freed
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		usedIDs.UsedClusterIDsMutex.Lock()
+		defer usedIDs.UsedClusterIDsMutex.Unlock()
+		assert.NotContains(c, usedIDs.UsedClusterIDs, uint32(2))
+		assert.Len(c, usedIDs.UsedClusterIDs, 1)
+	}, timeout, tick, "Cluster IDs were not freed correctly")
 
 	// wait for the nodes of the removed cluster to disappear
-	c.Assert(testutils.WaitUntil(func() bool {
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		nodesMutex.RLock()
 		defer nodesMutex.RUnlock()
-		return len(nodes) == 2*len(nodeNames)
-	}, 10*time.Second), IsNil)
+		assert.Len(c, nodes, 2*len(nodeNames))
+	}, timeout, tick, "Nodes were not drained correctly")
 
-	os.RemoveAll(config1)
-	os.RemoveAll(config3)
+	require.NoError(t, os.Remove(config1), "Failed to remove config file for cluster1")
+	require.NoError(t, os.Remove(config3), "Failed to remove config file for cluster3")
 
 	// wait for the removed cluster to disappear
-	c.Assert(testutils.WaitUntil(func() bool {
-		return cm.NumReadyClusters() == 0
-	}, 5*time.Second), IsNil)
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		assert.Equal(c, 0, cm.NumReadyClusters())
+	}, timeout, tick, "Clusters were not correctly removed")
 
 	// wait for the nodes of the removed cluster to disappear
-	c.Assert(testutils.WaitUntil(func() bool {
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		nodesMutex.RLock()
 		defer nodesMutex.RUnlock()
-		return len(nodes) == 0
-	}, 10*time.Second), IsNil)
+		assert.Len(c, nodes, 0)
+	}, timeout, tick, "Nodes were not drained correctly")
+
+	// Make sure that IDs are freed
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		usedIDs.UsedClusterIDsMutex.Lock()
+		defer usedIDs.UsedClusterIDsMutex.Unlock()
+		assert.Len(c, usedIDs.UsedClusterIDs, 0)
+	}, timeout, tick, "Cluster IDs were not freed correctly")
 }

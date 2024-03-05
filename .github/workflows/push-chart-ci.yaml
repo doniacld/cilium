@@ -3,7 +3,9 @@ name: Chart CI Push
 on:
   # run after the image build completes
   workflow_run:
-    workflows: ["Image CI Build"]
+    workflows:
+      - Image CI Build
+      - Hot Fix Image Release Build
     types:
       - completed
   # allow manually triggering it as well, for existing refs
@@ -25,7 +27,7 @@ permissions:
   contents: read
   # To allow retrieving information from the PR API
   pull-requests: read
-  # So that Sibz/github-status-action can write into the status API
+  # To be able to set commit status
   statuses: write
 
 concurrency:
@@ -36,17 +38,15 @@ concurrency:
     }}
   cancel-in-progress: true
 
-env:
-  check_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
 jobs:
   push-charts:
-    runs-on: ubuntu-20.04
+    name: Push Charts
+    runs-on: ubuntu-22.04
     # we also check for push events in case someone is testing the workflow by uncommenting the push trigger above.
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     steps:
     - name: Checkout GitHub main
-      uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab # v3.5.2
+      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       with:
         ref: ${{ github.event.repository.default_branch }}
         persist-credentials: false
@@ -77,26 +77,31 @@ jobs:
         fi
 
     - name: Set commit status to pending
-      uses: Sibz/github-status-action@650dd1a882a76dbbbc4576fb5974b8d22f29847f # v1.1.6
+      uses: myrotvorets/set-commit-status-action@3730c0a348a2ace3c110851bed53331bc6406e9f # v2.0.1
       with:
-        authToken: ${{ secrets.GITHUB_TOKEN }}
         sha: ${{ steps.get-ref.outputs.sha }}
-        context: ${{ github.workflow }}
+        status: pending
         description: Helm push in progress
-        state: pending
-        target_url: ${{ env.check_url }}
 
     - name: Checkout Source Code
-      uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab # v3.5.2
+      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       with:
         persist-credentials: false
         # checkout ref not SHA so we can get useful branch names (see previous comments)
         ref: ${{ steps.get-ref.outputs.ref }}
         # required for git describe
         fetch-depth: 0
-    - id: get-version
+    - name: Get version
+      id: get-version
       run: |
-        echo "chart_version=$(./contrib/scripts/print-chart-version.sh)" | tee -a $GITHUB_OUTPUT
+        set -o pipefail
+        set -e
+        if [[ -f ./contrib/scripts/print-chart-version.sh ]]; then
+          echo "chart_version=$(./contrib/scripts/print-chart-version.sh)" | tee -a $GITHUB_OUTPUT
+        else
+          echo "./contrib/scripts/print-chart-version.sh missing. Perhaps it needs to be backported to your target branch?"
+          exit 1
+        fi
 
     - name: Push charts
       uses: cilium/reusable-workflows/.github/actions/push-helm-chart@6ae27958f2f37545bf48e44106b73df05b1f6d12 # v0.1.0
@@ -109,15 +114,28 @@ jobs:
 
             "image.repository": "quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/cilium-ci",
             "image.tag": "${{ steps.get-ref.outputs.sha }}",
+            "image.digest": "",
+            "image.useDigest": false,
             "preflight.image.repository": "quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/cilium-ci",
             "preflight.image.tag": "${{ steps.get-ref.outputs.sha }}",
+            "preflight.image.digest": "",
+            "preflight.image.useDigest": false,
             "operator.image.repository": "quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/operator",
             "operator.image.suffix": "-ci",
+            "operator.image.genericDigest": "",
+            "operator.image.azureDigest": "",
+            "operator.image.awsDigest": "",
+            "operator.image.alibabacloudDigest": "",
+            "operator.image.useDigest": false,
             "operator.image.tag": "${{ steps.get-ref.outputs.sha }}",
             "hubble.relay.image.repository": "quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/hubble-relay-ci",
             "hubble.relay.image.tag": "${{ steps.get-ref.outputs.sha }}",
+            "hubble.relay.image.digest": "",
+            "hubble.relay.image.useDigest": false,
             "clustermesh.apiserver.image.repository": "quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/clustermesh-apiserver-ci",
-            "clustermesh.apiserver.image.tag": "${{ steps.get-ref.outputs.sha }}"
+            "clustermesh.apiserver.image.tag": "${{ steps.get-ref.outputs.sha }}",
+            "clustermesh.apiserver.image.digest": "",
+            "clustermesh.apiserver.image.useDigest": false
           }
         registry: quay.io
         registry_namespace: ${{ env.QUAY_CHARTS_ORGANIZATION_DEV }}
@@ -132,33 +150,24 @@ jobs:
 
     - name: Set commit status to success
       if: ${{ success() }}
-      uses: Sibz/github-status-action@650dd1a882a76dbbbc4576fb5974b8d22f29847f # v1.1.6
+      uses: myrotvorets/set-commit-status-action@3730c0a348a2ace3c110851bed53331bc6406e9f # v2.0.1
       with:
-        authToken: ${{ secrets.GITHUB_TOKEN }}
         sha: ${{ steps.get-ref.outputs.sha }}
-        context: ${{ github.workflow }}
+        status: success
         description: Helm push successful
-        state: success
-        target_url: ${{ env.check_url }}
 
     - name: Set commit status to failure
       if: ${{ failure() }}
-      uses: Sibz/github-status-action@650dd1a882a76dbbbc4576fb5974b8d22f29847f # v1.1.6
+      uses: myrotvorets/set-commit-status-action@3730c0a348a2ace3c110851bed53331bc6406e9f # v2.0.1
       with:
-        authToken: ${{ secrets.GITHUB_TOKEN }}
         sha: ${{ steps.get-ref.outputs.sha }}
-        context: ${{ github.workflow }}
+        status: failure
         description: Helm push failed
-        state: failure
-        target_url: ${{ env.check_url }}
 
     - name: Set commit status to cancelled
       if: ${{ cancelled() }}
-      uses: Sibz/github-status-action@650dd1a882a76dbbbc4576fb5974b8d22f29847f # v1.1.6
+      uses: myrotvorets/set-commit-status-action@3730c0a348a2ace3c110851bed53331bc6406e9f # v2.0.1
       with:
-        authToken: ${{ secrets.GITHUB_TOKEN }}
         sha: ${{ steps.get-ref.outputs.sha }}
-        context: ${{ github.workflow }}
+        status: error
         description: Helm push cancelled
-        state: error
-        target_url: ${{ env.check_url }}

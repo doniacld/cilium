@@ -10,7 +10,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/cilium/cilium/pkg/annotation"
-	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
+	"github.com/cilium/cilium/pkg/ipam"
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	slim_core_v1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	slim_meta_v1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
@@ -35,7 +35,19 @@ func (m mockStore[T]) IterKeys() resource.KeyIter {
 	panic("not implemented")
 }
 
+func (m mockStore[T]) IndexKeys(indexName, indexedValue string) ([]string, error) {
+	panic("not implemented")
+}
+
+func (m mockStore[T]) ByIndex(indexName, indexedValue string) ([]T, error) {
+	panic("not implemented")
+}
+
 func (m mockStore[T]) CacheStore() cache.Store {
+	panic("not implemented")
+}
+
+func (m mockStore[T]) Release() {
 	panic("not implemented")
 }
 
@@ -73,6 +85,38 @@ func TestManager_GetIPPoolForPod(t *testing.T) {
 					},
 				},
 			},
+			podKey("default", "custom-workload2"): &slim_core_v1.Pod{
+				ObjectMeta: slim_meta_v1.ObjectMeta{
+					Annotations: map[string]string{
+						annotation.IPAMIPv4PoolKey: "ipv4-pool",
+					},
+				},
+			},
+			podKey("default", "custom-workload3"): &slim_core_v1.Pod{
+				ObjectMeta: slim_meta_v1.ObjectMeta{
+					Annotations: map[string]string{
+						annotation.IPAMIPv4PoolKey: "ipv4-pool",
+						annotation.IPAMPoolKey:     "custom-pool",
+					},
+				},
+			},
+			podKey("default", "custom-workload4"): &slim_core_v1.Pod{
+				ObjectMeta: slim_meta_v1.ObjectMeta{
+					Annotations: map[string]string{
+						annotation.IPAMIPv4PoolKey: "ipv4-pool",
+						annotation.IPAMIPv6PoolKey: "ipv6-pool",
+					},
+				},
+			},
+			podKey("default", "custom-workload5"): &slim_core_v1.Pod{
+				ObjectMeta: slim_meta_v1.ObjectMeta{
+					Annotations: map[string]string{
+						annotation.IPAMIPv4PoolKey: "ipv4-pool",
+						annotation.IPAMIPv6PoolKey: "ipv6-pool",
+						annotation.IPAMPoolKey:     "custom-pool",
+					},
+				},
+			},
 
 			podKey("special", "server"): &slim_core_v1.Pod{},
 			podKey("special", "server2"): &slim_core_v1.Pod{
@@ -90,54 +134,99 @@ func TestManager_GetIPPoolForPod(t *testing.T) {
 	tests := []struct {
 		name     string
 		owner    string
+		ipfamily ipam.Family
 		wantPool string
 		wantErr  error
 	}{
 		{
 			name:     "no annotations",
 			owner:    "default/client",
-			wantPool: ipamOption.PoolDefault,
+			ipfamily: ipam.IPv4,
+			wantPool: ipam.PoolDefault().String(),
 		},
 		{
 			name:     "not a pod name",
 			owner:    "router",
-			wantPool: ipamOption.PoolDefault,
+			ipfamily: ipam.IPv4,
+			wantPool: ipam.PoolDefault().String(),
 		},
 		{
 			name:     "also not a pod name (due to underline)",
 			owner:    "default/xwing_net2",
-			wantPool: ipamOption.PoolDefault,
+			ipfamily: ipam.IPv4,
+			wantPool: ipam.PoolDefault().String(),
 		},
 		{
 			name:     "pod annotation",
 			owner:    "default/custom-workload",
+			ipfamily: ipam.IPv4,
 			wantPool: "custom-pool",
 		},
 		{
-			name:     "namespace annotation",
-			owner:    "special/server",
-			wantPool: "namespace-pool",
+			name:     "pod annotation only ipv4 pool request ipv4",
+			owner:    "default/custom-workload2",
+			ipfamily: ipam.IPv4,
+			wantPool: "ipv4-pool",
 		},
 		{
-			name:     "pod annotation in namespace with annotation",
-			owner:    "special/server2",
-			wantPool: "pod-pool",
+			name:     "pod annotation only ipv4 pool request ipv6",
+			owner:    "default/custom-workload2",
+			ipfamily: ipam.IPv6,
+			wantPool: ipam.PoolDefault().String(),
 		},
 		{
-			name:    "missing pod",
-			owner:   "does-not/exist",
-			wantErr: &ResourceNotFound{Resource: "Pod"},
+			name:     "pod annotation ipv4 and custom pool request ipv4",
+			owner:    "default/custom-workload3",
+			ipfamily: ipam.IPv4,
+			wantPool: "ipv4-pool",
 		},
 		{
-			name:    "missing namespace",
-			owner:   "missing-ns/pod",
-			wantErr: &ResourceNotFound{Resource: "Namespace"},
+			name:     "pod annotation ipv4 and custom pool request ipv6",
+			owner:    "default/custom-workload3",
+			ipfamily: ipam.IPv6,
+			wantPool: "custom-pool",
+		},
+		{
+			name:     "pod annotation ipv4 and ipv6 pool request ipv4",
+			owner:    "default/custom-workload4",
+			ipfamily: ipam.IPv4,
+			wantPool: "ipv4-pool",
+		},
+		{
+			name:     "pod annotation ipv4 and ipv6 pool request ipv6",
+			owner:    "default/custom-workload4",
+			ipfamily: ipam.IPv6,
+			wantPool: "ipv6-pool",
+		},
+		{
+			name:     "pod annotation ipv4, ipv6 and custom pool request ipv4",
+			owner:    "default/custom-workload3",
+			ipfamily: ipam.IPv4,
+			wantPool: "ipv4-pool",
+		},
+		{
+			name:     "pod annotation ipv4, ipv6 and custom pool request ipv6",
+			owner:    "default/custom-workload5",
+			ipfamily: ipam.IPv6,
+			wantPool: "ipv6-pool",
+		},
+		{
+			name:     "missing pod",
+			owner:    "does-not/exist",
+			ipfamily: ipam.IPv4,
+			wantErr:  &ResourceNotFound{Resource: "Pod"},
+		},
+		{
+			name:     "missing namespace",
+			owner:    "missing-ns/pod",
+			ipfamily: ipam.IPv4,
+			wantErr:  &ResourceNotFound{Resource: "Namespace"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotPool, err := m.GetIPPoolForPod(tt.owner)
+			gotPool, err := m.GetIPPoolForPod(tt.owner, tt.ipfamily)
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("GetIPPoolForPod() error = %v, wantErr %v", err, tt.wantErr)
 				return

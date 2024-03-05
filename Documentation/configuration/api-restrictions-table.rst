@@ -9,6 +9,8 @@ The following API flags are compatible with the ``cilium-agent`` flag
 ===================== ====================
 Flag Name             Description
 ===================== ====================
+DeleteEndpoint        Deletes a list of endpoints that have endpoints matching the
+                      provided properties
 DeleteEndpointID      Deletes the endpoint specified by the ID. Deletion is
                       imminent and atomic, if the deletion request is valid and
                       the endpoint exists, deletion will occur even if errors are
@@ -29,6 +31,9 @@ DeleteServiceID       -
 GetBGPPeers           Retrieves current operational state of BGP peers created by
                       Cilium BGP virtual router. This includes session state,
                       uptime, information per address family, etc.
+GetBGPRoutePolicies   Retrieves route policies from BGP Control Plane.
+GetBGPRoutes          Retrieves routes from BGP Control Plane RIB filtered by
+                      parameters you specify
 GetCgroupDumpMetadata -
 GetClusterNodes       -
 GetConfig             Returns the configuration of the Cilium daemon.
@@ -49,6 +54,8 @@ GetFqdnCacheID        Retrieves the list of DNS lookups intercepted from the
                       name, CIDR IP range or source.
 GetFqdnNames          Retrieves the list of DNS-related fields (names to poll,
                       selectors and their corresponding regexes).
+GetHealth             Returns modules health and status information of the Cilium
+                      daemon.
 GetHealthz            Returns health and status information of the Cilium daemon
                       and related components such as the local container runtime,
                       connected datastore, Kubernetes integration and Hubble.
@@ -76,6 +83,8 @@ GetRecorderID         -
 GetRecorderMasks      -
 GetService            -
 GetServiceID          -
+GetStatedbDump        -
+GetStatedbQueryTable  -
 PatchConfig           Updates the daemon configuration by applying the provided
                       ConfigurationMap and regenerates & recompiles all required
                       datapath components.

@@ -6,16 +6,14 @@ import (
 	"context"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
-// Describes your Elastic IP addresses that are being moved to the EC2-VPC
-// platform, or that are being restored to the EC2-Classic platform. This request
-// does not return information about any other Elastic IP addresses in your
-// account.
+// This action is deprecated. Describes your Elastic IP addresses that are being
+// moved from or being restored to the EC2-Classic platform. This request does not
+// return information about any other Elastic IP addresses in your account.
 func (c *Client) DescribeMovingAddresses(ctx context.Context, params *DescribeMovingAddressesInput, optFns ...func(*Options)) (*DescribeMovingAddressesOutput, error) {
 	if params == nil {
 		params = &DescribeMovingAddressesInput{}
@@ -35,14 +33,13 @@ type DescribeMovingAddressesInput struct {
 
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	// One or more filters.
-	//
-	// * moving-status - The status of the Elastic IP address
-	// (MovingToVpc | RestoringToClassic).
+	//   - moving-status - The status of the Elastic IP address ( MovingToVpc |
+	//   RestoringToClassic ).
 	Filters []types.Filter
 
 	// The maximum number of results to return for the request in a single page. The
@@ -77,6 +74,9 @@ type DescribeMovingAddressesOutput struct {
 }
 
 func (c *Client) addOperationDescribeMovingAddressesMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeMovingAddresses{}, middleware.After)
 	if err != nil {
 		return err
@@ -85,34 +85,38 @@ func (c *Client) addOperationDescribeMovingAddressesMiddlewares(stack *middlewar
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeMovingAddresses"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -121,7 +125,13 @@ func (c *Client) addOperationDescribeMovingAddressesMiddlewares(stack *middlewar
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeMovingAddresses(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -131,6 +141,9 @@ func (c *Client) addOperationDescribeMovingAddressesMiddlewares(stack *middlewar
 		return err
 	}
 	if err = addRequestResponseLogging(stack, options); err != nil {
+		return err
+	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
 	return nil
@@ -236,7 +249,6 @@ func newServiceMetadataMiddleware_opDescribeMovingAddresses(region string) *awsm
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeMovingAddresses",
 	}
 }

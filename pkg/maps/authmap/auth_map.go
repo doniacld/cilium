@@ -35,6 +35,9 @@ type Map interface {
 	// IterateWithCallback iterates through all the keys/values of an auth map,
 	// passing each key/value pair to the cb callback.
 	IterateWithCallback(cb IterateCallback) error
+
+	// MaxEntries returns the maximum number of entries the auth map can hold.
+	MaxEntries() uint32
 }
 
 type authMap struct {
@@ -113,11 +116,13 @@ func (m *authMap) IterateWithCallback(cb IterateCallback) error {
 	)
 }
 
+func (m *authMap) MaxEntries() uint32 {
+	return m.bpfMap.MaxEntries()
+}
+
 // AuthKey implements the bpf.MapKey interface.
 //
 // Must be in sync with struct auth_key in <bpf/lib/common.h>
-// +k8s:deepcopy-gen=true
-// +k8s:deepcopy-gen:interfaces=github.com/cilium/cilium/pkg/bpf.MapKey
 type AuthKey struct {
 	LocalIdentity  uint32 `align:"local_sec_label"`
 	RemoteIdentity uint32 `align:"remote_sec_label"`
@@ -126,25 +131,17 @@ type AuthKey struct {
 	Pad            uint8  `align:"pad"`
 }
 
-func (r *AuthKey) GetKeyPtr() unsafe.Pointer { return unsafe.Pointer(r) }
-
-func (r *AuthKey) NewValue() bpf.MapValue { return &AuthInfo{} }
-
 func (r *AuthKey) String() string {
 	return fmt.Sprintf("localIdentity=%d, remoteIdentity=%d, remoteNodeID=%d, authType=%d", r.LocalIdentity, r.RemoteIdentity, r.RemoteNodeID, r.AuthType)
 }
+func (r *AuthKey) New() bpf.MapKey { return &AuthKey{} }
 
 // AuthInfo implements the bpf.MapValue interface.
 //
 // Must be in sync with struct auth_info in <bpf/lib/common.h>
-// +k8s:deepcopy-gen=true
-// +k8s:deepcopy-gen:interfaces=github.com/cilium/cilium/pkg/bpf.MapValue
 type AuthInfo struct {
 	Expiration utime.UTime `align:"expiration"`
 }
-
-// GetValuePtr returns the unsafe pointer to the BPF value.
-func (r *AuthInfo) GetValuePtr() unsafe.Pointer { return unsafe.Pointer(r) }
 
 func (r *AuthInfo) String() string {
 	return fmt.Sprintf("expiration=%q", r.Expiration)

@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -31,28 +30,24 @@ func (c *Client) GetTransitGatewayMulticastDomainAssociations(ctx context.Contex
 
 type GetTransitGatewayMulticastDomainAssociationsInput struct {
 
+	// The ID of the transit gateway multicast domain.
+	//
+	// This member is required.
+	TransitGatewayMulticastDomainId *string
+
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	// One or more filters. The possible values are:
-	//
-	// * resource-id - The ID of the
-	// resource.
-	//
-	// * resource-type - The type of resource. The valid value is: vpc.
-	//
-	// *
-	// state - The state of the subnet association. Valid values are associated |
-	// associating | disassociated | disassociating.
-	//
-	// * subnet-id - The ID of the
-	// subnet.
-	//
-	// * transit-gateway-attachment-id - The id of the transit gateway
-	// attachment.
+	//   - resource-id - The ID of the resource.
+	//   - resource-type - The type of resource. The valid value is: vpc .
+	//   - state - The state of the subnet association. Valid values are associated |
+	//   associating | disassociated | disassociating .
+	//   - subnet-id - The ID of the subnet.
+	//   - transit-gateway-attachment-id - The id of the transit gateway attachment.
 	Filters []types.Filter
 
 	// The maximum number of results to return with a single call. To retrieve the
@@ -61,9 +56,6 @@ type GetTransitGatewayMulticastDomainAssociationsInput struct {
 
 	// The token for the next page of results.
 	NextToken *string
-
-	// The ID of the transit gateway multicast domain.
-	TransitGatewayMulticastDomainId *string
 
 	noSmithyDocumentSerde
 }
@@ -84,6 +76,9 @@ type GetTransitGatewayMulticastDomainAssociationsOutput struct {
 }
 
 func (c *Client) addOperationGetTransitGatewayMulticastDomainAssociationsMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpGetTransitGatewayMulticastDomainAssociations{}, middleware.After)
 	if err != nil {
 		return err
@@ -92,34 +87,38 @@ func (c *Client) addOperationGetTransitGatewayMulticastDomainAssociationsMiddlew
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "GetTransitGatewayMulticastDomainAssociations"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -128,7 +127,16 @@ func (c *Client) addOperationGetTransitGatewayMulticastDomainAssociationsMiddlew
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addOpGetTransitGatewayMulticastDomainAssociationsValidationMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opGetTransitGatewayMulticastDomainAssociations(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -138,6 +146,9 @@ func (c *Client) addOperationGetTransitGatewayMulticastDomainAssociationsMiddlew
 		return err
 	}
 	if err = addRequestResponseLogging(stack, options); err != nil {
+		return err
+	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
 	return nil
@@ -241,7 +252,6 @@ func newServiceMetadataMiddleware_opGetTransitGatewayMulticastDomainAssociations
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "GetTransitGatewayMulticastDomainAssociations",
 	}
 }

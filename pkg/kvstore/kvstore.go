@@ -4,7 +4,9 @@
 package kvstore
 
 import (
-	"time"
+	"strings"
+
+	"github.com/cilium/cilium/pkg/time"
 )
 
 // Value is an abstraction of the data stored in the kvstore as well as the
@@ -19,16 +21,7 @@ type Value struct {
 // KeyValuePairs is a map of key=value pairs
 type KeyValuePairs map[string]Value
 
-// Capabilities is a bitmask to indicate the capabilities of a backend
-type Capabilities uint32
-
 const (
-	// CapabilityCreateIfExists is true if CreateIfExists is functional
-	CapabilityCreateIfExists Capabilities = 1 << 0
-
-	// CapabilityDeleteOnZeroCount is true if DeleteOnZeroCount is functional
-	CapabilityDeleteOnZeroCount Capabilities = 1 << 1
-
 	// BaseKeyPrefix is the base prefix that should be used for all keys
 	BaseKeyPrefix = "cilium"
 
@@ -59,3 +52,13 @@ const (
 	// HeartbeatPath is updated
 	HeartbeatWriteInterval = time.Minute
 )
+
+// StateToCachePrefix converts a kvstore prefix starting with "cilium/state"
+// (holding the cilium state) to the corresponding one holding cached information
+// from another kvstore (that is, "cilium/cache").
+func StateToCachePrefix(prefix string) string {
+	if strings.HasPrefix(prefix, "cilium/state") {
+		return strings.Replace(prefix, "cilium/state", "cilium/cache", 1)
+	}
+	return prefix
+}

@@ -5,13 +5,16 @@ package api
 
 import (
 	"fmt"
+	"testing"
 
 	. "github.com/cilium/checkmate"
+	"github.com/cilium/proxy/pkg/policy/api/kafka"
+
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/option"
-	"github.com/cilium/cilium/pkg/policy/api/kafka"
 )
 
 // This test ensures that only PortRules which have L7Rules associated with them
@@ -560,39 +563,33 @@ func (s *PolicyAPITestSuite) TestHTTPRuleRegexes(c *C) {
 func (s *PolicyAPITestSuite) TestCIDRsanitize(c *C) {
 	// IPv4
 	cidr := CIDRRule{Cidr: "0.0.0.0/0"}
-	length, err := cidr.sanitize()
+	err := cidr.sanitize()
 	c.Assert(err, IsNil)
-	c.Assert(length, Equals, 0)
 
 	cidr = CIDRRule{Cidr: "10.0.0.0/24"}
-	length, err = cidr.sanitize()
+	err = cidr.sanitize()
 	c.Assert(err, IsNil)
-	c.Assert(length, Equals, 24)
 
 	cidr = CIDRRule{Cidr: "192.0.2.3/32"}
-	length, err = cidr.sanitize()
+	err = cidr.sanitize()
 	c.Assert(err, IsNil)
-	c.Assert(length, Equals, 32)
 
 	// IPv6
 	cidr = CIDRRule{Cidr: "::/0"}
-	length, err = cidr.sanitize()
+	err = cidr.sanitize()
 	c.Assert(err, IsNil)
-	c.Assert(length, Equals, 0)
 
 	cidr = CIDRRule{Cidr: "ff02::/64"}
-	length, err = cidr.sanitize()
+	err = cidr.sanitize()
 	c.Assert(err, IsNil)
-	c.Assert(length, Equals, 64)
 
 	cidr = CIDRRule{Cidr: "2001:0db8:85a3:0000:0000:8a2e:0370:7334/128"}
-	length, err = cidr.sanitize()
+	err = cidr.sanitize()
 	c.Assert(err, IsNil)
-	c.Assert(length, Equals, 128)
 
 	// Non-contiguous mask.
 	cidr = CIDRRule{Cidr: "10.0.0.0/254.0.0.255"}
-	_, err = cidr.sanitize()
+	err = cidr.sanitize()
 	c.Assert(err, NotNil)
 }
 
@@ -627,7 +624,7 @@ func (s *PolicyAPITestSuite) TestToServicesSanitize(c *C) {
 	}
 
 	err := toServicesL3L4.Sanitize()
-	c.Assert(err, IsNil)
+	c.Assert(err, NotNil)
 
 }
 
@@ -927,8 +924,9 @@ func (s *PolicyAPITestSuite) TestTooManyICMPFields(c *C) {
 	var fields []ICMPField
 
 	for i := 1; i <= 1+maxICMPFields; i++ {
+		icmpType := intstr.FromInt(i)
 		fields = append(fields, ICMPField{
-			Type: uint8(i),
+			Type: &icmpType,
 		})
 	}
 
@@ -950,6 +948,7 @@ func (s *PolicyAPITestSuite) TestTooManyICMPFields(c *C) {
 }
 
 func (s *PolicyAPITestSuite) TestWrongICMPFieldFamily(c *C) {
+	icmpType := intstr.FromInt(0)
 	wrongFamilyICMPRule := Rule{
 		EndpointSelector: WildcardEndpointSelector,
 		Ingress: []IngressRule{
@@ -960,7 +959,7 @@ func (s *PolicyAPITestSuite) TestWrongICMPFieldFamily(c *C) {
 				ICMPs: ICMPRules{{
 					Fields: []ICMPField{{
 						Family: "hoge",
-						Type:   0,
+						Type:   &icmpType,
 					}},
 				}},
 			},
@@ -971,6 +970,7 @@ func (s *PolicyAPITestSuite) TestWrongICMPFieldFamily(c *C) {
 }
 
 func (s *PolicyAPITestSuite) TestICMPRuleWithOtherRuleFailed(c *C) {
+	icmpType := intstr.FromInt(8)
 	ingressICMPWithPort := Rule{
 		EndpointSelector: WildcardEndpointSelector,
 		Ingress: []IngressRule{
@@ -985,7 +985,7 @@ func (s *PolicyAPITestSuite) TestICMPRuleWithOtherRuleFailed(c *C) {
 				}},
 				ICMPs: ICMPRules{{
 					Fields: []ICMPField{{
-						Type: 8,
+						Type: &icmpType,
 					}},
 				}},
 			},
@@ -1006,7 +1006,7 @@ func (s *PolicyAPITestSuite) TestICMPRuleWithOtherRuleFailed(c *C) {
 				}},
 				ICMPs: ICMPRules{{
 					Fields: []ICMPField{{
-						Type: 8,
+						Type: &icmpType,
 					}},
 				}},
 			},
@@ -1073,4 +1073,22 @@ func (s *PolicyAPITestSuite) TestL7RuleDirectionalitySupport(c *C) {
 	err = invalidDNSRule.Sanitize()
 	c.Assert(err, Not(IsNil))
 
+}
+
+func BenchmarkCIDRSanitize(b *testing.B) {
+	cidr4 := CIDRRule{Cidr: "192.168.100.200/24"}
+	cidr6 := CIDRRule{Cidr: "2001:0db8:85a3:0000:0000:8a2e:0370:7334/128"}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err := cidr4.sanitize()
+		if err != nil {
+			b.Fatal(err)
+		}
+		err = cidr6.sanitize()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }

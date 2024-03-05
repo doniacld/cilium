@@ -5,6 +5,7 @@ package envoy
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cilium/lumberjack/v2"
 	cilium "github.com/cilium/proxy/go/cilium/api"
@@ -20,6 +20,7 @@ import (
 	envoy_config_cluster "github.com/cilium/proxy/go/envoy/config/cluster/v3"
 	envoy_config_core "github.com/cilium/proxy/go/envoy/config/core/v3"
 	envoy_config_endpoint "github.com/cilium/proxy/go/envoy/config/endpoint/v3"
+	envoy_extensions_bootstrap_internal_listener_v3 "github.com/cilium/proxy/go/envoy/extensions/bootstrap/internal_listener/v3"
 	envoy_config_upstream "github.com/cilium/proxy/go/envoy/extensions/upstreams/http/v3"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
@@ -33,6 +34,7 @@ import (
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/time"
 )
 
 var log = logging.DefaultLogger.WithField(logfields.LogSubsys, "envoy-manager")
@@ -53,7 +55,8 @@ var (
 )
 
 const (
-	ciliumEnvoy = "cilium-envoy"
+	ciliumEnvoyStarter = "cilium-envoy-starter"
+	ciliumEnvoy        = "cilium-envoy"
 )
 
 // EnableTracing changes Envoy log level to "trace", producing the most logs.
@@ -81,9 +84,9 @@ type EmbeddedEnvoy struct {
 	admin  *EnvoyAdminClient
 }
 
-// StartEmbeddedEnvoy starts an Envoy proxy instance.
-func StartEmbeddedEnvoy(runDir, logPath string, baseID uint64) *EmbeddedEnvoy {
-	e := &EmbeddedEnvoy{
+// startEmbeddedEnvoy starts an Envoy proxy instance.
+func startEmbeddedEnvoy(runDir, logPath string, baseID uint64) (*EmbeddedEnvoy, error) {
+	envoy := &EmbeddedEnvoy{
 		stopCh: make(chan struct{}),
 		errCh:  make(chan error, 1),
 		admin:  NewEnvoyAdminClientForSocket(GetSocketDir(runDir)),
@@ -99,7 +102,7 @@ func StartEmbeddedEnvoy(runDir, logPath string, baseID uint64) *EmbeddedEnvoy {
 	createBootstrap(bootstrapPath, nodeId, ingressClusterName,
 		xdsSocketPath, egressClusterName, ingressClusterName, getAdminSocketPath(GetSocketDir(runDir)))
 
-	log.Debugf("Envoy: Starting: %v", *e)
+	log.Debugf("Envoy: Starting: %v", *envoy)
 
 	// make it a buffered channel, so we can not only
 	// read the written value but also skip it in
@@ -115,7 +118,7 @@ func StartEmbeddedEnvoy(runDir, logPath string, baseID uint64) *EmbeddedEnvoy {
 				Filename:   logPath,
 				MaxSize:    100, // megabytes
 				MaxBackups: 3,
-				MaxAge:     28,   //days
+				MaxAge:     28,   // days
 				Compress:   true, // disabled by default
 			}
 			logWriter = logger
@@ -134,7 +137,7 @@ func StartEmbeddedEnvoy(runDir, logPath string, baseID uint64) *EmbeddedEnvoy {
 
 		for {
 			logLevel := logging.GetLevel(logging.DefaultLogger)
-			cmd := exec.Command(ciliumEnvoy, "-l", mapLogLevel(logLevel), "-c", bootstrapPath, "--base-id", strconv.FormatUint(baseID, 10), "--log-format", logFormat)
+			cmd := exec.Command(ciliumEnvoyStarter, "-l", mapLogLevel(logLevel), "-c", bootstrapPath, "--base-id", strconv.FormatUint(baseID, 10), "--log-format", logFormat)
 			cmd.Stderr = logWriter
 			cmd.Stdout = logWriter
 
@@ -153,7 +156,7 @@ func StartEmbeddedEnvoy(runDir, logPath string, baseID uint64) *EmbeddedEnvoy {
 			}
 
 			log.Infof("Envoy: Proxy started with pid %d", cmd.Process.Pid)
-			metrics.SubprocessStart.WithLabelValues(ciliumEnvoy).Inc()
+			metrics.SubprocessStart.WithLabelValues(ciliumEnvoyStarter).Inc()
 
 			// We do not return after a successful start, but watch the Envoy process
 			// and restart it if it crashes.
@@ -176,27 +179,27 @@ func StartEmbeddedEnvoy(runDir, logPath string, baseID uint64) *EmbeddedEnvoy {
 			case <-crashCh:
 				// Start Envoy again
 				continue
-			case <-e.stopCh:
+			case <-envoy.stopCh:
 				log.Infof("Envoy: Stopping proxy with pid %d", cmd.Process.Pid)
-				if err := e.admin.quit(); err != nil {
+				if err := envoy.admin.quit(); err != nil {
 					log.WithError(err).Fatalf("Envoy: Envoy admin quit failed, killing process with pid %d", cmd.Process.Pid)
 
 					if err := cmd.Process.Kill(); err != nil {
 						log.WithError(err).Fatal("Envoy: Stopping Envoy failed")
-						e.errCh <- err
+						envoy.errCh <- err
 					}
 				}
-				close(e.errCh)
+				close(envoy.errCh)
 				return
 			}
 		}
 	}()
 
 	if <-started {
-		return e
+		return envoy, nil
 	}
 
-	return nil
+	return nil, errors.New("failed to start embedded Envoy server")
 }
 
 // newEnvoyLogPiper creates a writer that parses and logs log messages written by Envoy.
@@ -245,9 +248,8 @@ func newEnvoyLogPiper() io.WriteCloser {
 			case "off", "critical", "error":
 				scopedLog.Error(msg)
 			case "warning":
-				// Silently drop expected warnings if flowdebug is not enabled
-				// TODO: Remove this special case when https://github.com/envoyproxy/envoy/issues/13504 is fixed.
-				if !flowdebug.Enabled() && strings.Contains(msg, "Unable to use runtime singleton for feature envoy.http.headermap.lazy_map_min_size") {
+				if !tracing && (strings.Contains(msg, "Usage of the deprecated runtime key overload.global_downstream_max_connections, consider switching to `envoy.resource_monitors.downstream_connections` instead.This runtime key will be removed in future.") ||
+					strings.Contains(msg, "There is no configured limit to the number of allowed active downstream connections. Configure a limit in `envoy.resource_monitors.downstream_connections` resource monitor.")) {
 					continue
 				}
 				scopedLog.Warn(msg)
@@ -267,7 +269,7 @@ func newEnvoyLogPiper() io.WriteCloser {
 	return writer
 }
 
-// Stop kills the Envoy process started with StartEmbeddedEnvoy. The gRPC API streams are terminated
+// Stop kills the Envoy process started with startEmbeddedEnvoy. The gRPC API streams are terminated
 // first.
 func (e *EmbeddedEnvoy) Stop() error {
 	close(e.stopCh)
@@ -390,7 +392,8 @@ func createBootstrap(filePath string, nodeId, cluster string, xdsSock, egressClu
 									Endpoint: &envoy_config_endpoint.Endpoint{
 										Address: &envoy_config_core.Address{
 											Address: &envoy_config_core.Address_Pipe{
-												Pipe: &envoy_config_core.Pipe{Path: xdsSock}},
+												Pipe: &envoy_config_core.Pipe{Path: xdsSock},
+											},
 										},
 									},
 								},
@@ -412,7 +415,8 @@ func createBootstrap(filePath string, nodeId, cluster string, xdsSock, egressClu
 									Endpoint: &envoy_config_endpoint.Endpoint{
 										Address: &envoy_config_core.Address{
 											Address: &envoy_config_core.Address_Pipe{
-												Pipe: &envoy_config_core.Pipe{Path: adminPath}},
+												Pipe: &envoy_config_core.Pipe{Path: adminPath},
+											},
 										},
 									},
 								},
@@ -423,14 +427,20 @@ func createBootstrap(filePath string, nodeId, cluster string, xdsSock, egressClu
 			},
 		},
 		DynamicResources: &envoy_config_bootstrap.Bootstrap_DynamicResources{
-			LdsConfig: ciliumXDS,
-			CdsConfig: ciliumXDS,
+			LdsConfig: CiliumXDSConfigSource,
+			CdsConfig: CiliumXDSConfigSource,
 		},
 		Admin: &envoy_config_bootstrap.Admin{
 			Address: &envoy_config_core.Address{
 				Address: &envoy_config_core.Address_Pipe{
 					Pipe: &envoy_config_core.Pipe{Path: adminPath},
 				},
+			},
+		},
+		BootstrapExtensions: []*envoy_config_core.TypedExtensionConfig{
+			{
+				Name:        "envoy.bootstrap.internal_listener",
+				TypedConfig: toAny(&envoy_extensions_bootstrap_internal_listener_v3.InternalListener{}),
 			},
 		},
 		LayeredRuntime: &envoy_config_bootstrap.LayeredRuntime{
@@ -458,4 +468,20 @@ func createBootstrap(filePath string, nodeId, cluster string, xdsSock, egressClu
 	if err != nil {
 		log.WithError(err).Fatal("Envoy: Error writing Envoy bootstrap file")
 	}
+}
+
+// getEmbeddedEnvoyVersion returns the envoy binary version string
+func getEmbeddedEnvoyVersion() (string, error) {
+	out, err := exec.Command(ciliumEnvoy, "--version").Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to execute '%s --version': %w", ciliumEnvoy, err)
+	}
+	envoyVersionString := strings.TrimSpace(string(out))
+
+	envoyVersionArray := strings.Fields(envoyVersionString)
+	if len(envoyVersionArray) < 3 {
+		return "", fmt.Errorf("failed to extract version from truncated Envoy version string")
+	}
+
+	return envoyVersionArray[2], nil
 }

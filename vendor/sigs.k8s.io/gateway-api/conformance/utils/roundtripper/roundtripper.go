@@ -21,15 +21,22 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	iou "io/ioutil"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"regexp"
 
+	"golang.org/x/net/http2"
+
 	"sigs.k8s.io/gateway-api/conformance/utils/config"
+)
+
+const (
+	H2CPriorKnowledgeProtocol = "H2C_PRIOR_KNOWLEDGE"
 )
 
 // RoundTripper is an interface used to make requests within conformance tests.
@@ -49,6 +56,20 @@ type Request struct {
 	CertPem          []byte
 	KeyPem           []byte
 	Server           string
+}
+
+// String returns a printable version of Request for logging. Note that the
+// CertPem and KeyPem are truncated.
+func (r Request) String() string {
+	return fmt.Sprintf("{URL: %+v, Host: %v, Protocol: %v, Method: %v, Headers: %v, UnfollowRedirect: %v, Server: %v, CertPem: <truncated>, KeyPem: <truncated>}",
+		r.URL,
+		r.Host,
+		r.Protocol,
+		r.Method,
+		r.Headers,
+		r.UnfollowRedirect,
+		r.Server,
+	)
 }
 
 // CapturedRequest contains request metadata captured from an echoserver
@@ -85,8 +106,48 @@ type CapturedResponse struct {
 // DefaultRoundTripper is the default implementation of a RoundTripper. It will
 // be used if a custom implementation is not specified.
 type DefaultRoundTripper struct {
-	Debug         bool
-	TimeoutConfig config.TimeoutConfig
+	Debug             bool
+	TimeoutConfig     config.TimeoutConfig
+	CustomDialContext func(context.Context, string, string) (net.Conn, error)
+}
+
+func (d *DefaultRoundTripper) httpTransport(request Request) (http.RoundTripper, error) {
+	transport := &http.Transport{
+		DialContext: d.CustomDialContext,
+		// We disable keep-alives so that we don't leak established TCP connections.
+		// Leaking TCP connections is bad because we could eventually hit the
+		// threshold of maximum number of open TCP connections to a specific
+		// destination. Keep-alives are not presently utilized so disabling this has
+		// no adverse affect.
+		//
+		// Ref. https://github.com/kubernetes-sigs/gateway-api/issues/2357
+		DisableKeepAlives: true,
+	}
+	if request.Server != "" && len(request.CertPem) != 0 && len(request.KeyPem) != 0 {
+		tlsConfig, err := tlsClientConfig(request.Server, request.CertPem, request.KeyPem)
+		if err != nil {
+			return nil, err
+		}
+		transport.TLSClientConfig = tlsConfig
+	}
+
+	return transport, nil
+}
+
+func (d *DefaultRoundTripper) h2cPriorKnowledgeTransport(request Request) (http.RoundTripper, error) {
+	if request.Server != "" && len(request.CertPem) != 0 && len(request.KeyPem) != 0 {
+		return nil, errors.New("request has configured cert and key but h2 prior knowledge is not encrypted")
+	}
+
+	transport := &http2.Transport{
+		AllowHTTP: true,
+		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, addr)
+		},
+	}
+
+	return transport, nil
 }
 
 // CaptureRoundTrip makes a request with the provided parameters and returns the
@@ -94,7 +155,24 @@ type DefaultRoundTripper struct {
 // there is an error running the function but not if an HTTP error status code
 // is received.
 func (d *DefaultRoundTripper) CaptureRoundTrip(request Request) (*CapturedRequest, *CapturedResponse, error) {
-	cReq := &CapturedRequest{}
+	var transport http.RoundTripper
+	var err error
+
+	switch request.Protocol {
+	case H2CPriorKnowledgeProtocol:
+		transport, err = d.h2cPriorKnowledgeTransport(request)
+	default:
+		transport, err = d.httpTransport(request)
+	}
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return d.defaultRoundTrip(request, transport)
+}
+
+func (d *DefaultRoundTripper) defaultRoundTrip(request Request, transport http.RoundTripper) (*CapturedRequest, *CapturedResponse, error) {
 	client := &http.Client{}
 
 	if request.UnfollowRedirect {
@@ -103,35 +181,7 @@ func (d *DefaultRoundTripper) CaptureRoundTrip(request Request) (*CapturedReques
 		}
 	}
 
-	// Setup TLS transport if there are CertPem, KeyPem, and Server in the request
-	if request.Server != "" && len(request.CertPem) != 0 && len(request.KeyPem) != 0 {
-		// Create a certificate from the provided cert and key
-		cert, err := tls.X509KeyPair(request.CertPem, request.KeyPem)
-		if err != nil {
-			return nil, nil, fmt.Errorf("unexpected error creating cert: %w", err)
-		}
-
-		// Add the provided cert as a trusted CA
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(request.CertPem) {
-			return nil, nil, fmt.Errorf("unexpected error adding trusted CA: %w", err)
-		}
-
-		if request.Server == "" {
-			return nil, nil, fmt.Errorf("unexpected error, server name required for TLS")
-		}
-
-		// Create the Transport for this provided host, cert, and trusted CA
-		client.Transport = &http.Transport{
-			// Disable G402: TLS MinVersion too low. (gosec)
-			// #nosec G402
-			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{cert},
-				ServerName:   request.Server,
-				RootCAs:      certPool,
-			},
-		}
-	}
+	client.Transport = transport
 
 	method := "GET"
 	if request.Method != "" {
@@ -168,9 +218,7 @@ func (d *DefaultRoundTripper) CaptureRoundTrip(request Request) (*CapturedReques
 	if err != nil {
 		return nil, nil, err
 	}
-	defer func(Body io.ReadCloser) {
-		_ = Body.Close()
-	}(resp.Body)
+	defer resp.Body.Close()
 
 	if d.Debug {
 		var dump []byte
@@ -182,7 +230,12 @@ func (d *DefaultRoundTripper) CaptureRoundTrip(request Request) (*CapturedReques
 		fmt.Printf("Received Response:\n%s\n\n", formatDump(dump, "< "))
 	}
 
-	body, _ := iou.ReadAll(resp.Body)
+	cReq := &CapturedRequest{}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// we cannot assume the response is JSON
 	if resp.Header.Get("Content-type") == "application/json" {
@@ -190,6 +243,8 @@ func (d *DefaultRoundTripper) CaptureRoundTrip(request Request) (*CapturedReques
 		if err != nil {
 			return nil, nil, fmt.Errorf("unexpected error reading response: %w", err)
 		}
+	} else {
+		cReq.Method = method // assume it made the right request if the service being called isn't echoing
 	}
 
 	cRes := &CapturedResponse{
@@ -215,6 +270,33 @@ func (d *DefaultRoundTripper) CaptureRoundTrip(request Request) (*CapturedReques
 	return cReq, cRes, nil
 }
 
+func tlsClientConfig(server string, certPem []byte, keyPem []byte) (*tls.Config, error) {
+	// Create a certificate from the provided cert and key
+	cert, err := tls.X509KeyPair(certPem, keyPem)
+	if err != nil {
+		return nil, fmt.Errorf("unexpected error creating cert: %w", err)
+	}
+
+	// Add the provided cert as a trusted CA
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(certPem) {
+		return nil, fmt.Errorf("unexpected error adding trusted CA: %w", err)
+	}
+
+	if server == "" {
+		return nil, fmt.Errorf("unexpected error, server name required for TLS")
+	}
+
+	// Create the tls Config for this provided host, cert, and trusted CA
+	// Disable G402: TLS MinVersion too low. (gosec)
+	// #nosec G402
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ServerName:   server,
+		RootCAs:      certPool,
+	}, nil
+}
+
 // IsRedirect returns true if a given status code is a redirect code.
 func IsRedirect(statusCode int) bool {
 	switch statusCode {
@@ -226,6 +308,16 @@ func IsRedirect(statusCode int) bool {
 		http.StatusUseProxy,
 		http.StatusTemporaryRedirect,
 		http.StatusPermanentRedirect:
+		return true
+	}
+	return false
+}
+
+// IsTimeoutError returns true if a given status code is a timeout error code.
+func IsTimeoutError(statusCode int) bool {
+	switch statusCode {
+	case http.StatusRequestTimeout,
+		http.StatusGatewayTimeout:
 		return true
 	}
 	return false

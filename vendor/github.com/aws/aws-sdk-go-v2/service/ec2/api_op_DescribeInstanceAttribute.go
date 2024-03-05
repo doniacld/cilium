@@ -4,8 +4,8 @@ package ec2
 
 import (
 	"context"
+	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -46,8 +46,8 @@ type DescribeInstanceAttributeInput struct {
 
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	noSmithyDocumentSerde
@@ -60,10 +60,10 @@ type DescribeInstanceAttributeOutput struct {
 	BlockDeviceMappings []types.InstanceBlockDeviceMapping
 
 	// To enable the instance for Amazon Web Services Stop Protection, set this
-	// parameter to true; otherwise, set it to false.
+	// parameter to true ; otherwise, set it to false .
 	DisableApiStop *types.AttributeBooleanValue
 
-	// If the value is true, you can't terminate the instance through the Amazon EC2
+	// If the value is true , you can't terminate the instance through the Amazon EC2
 	// console, CLI, or API; otherwise, you can.
 	DisableApiTermination *types.AttributeBooleanValue
 
@@ -74,7 +74,7 @@ type DescribeInstanceAttributeOutput struct {
 	EnaSupport *types.AttributeBooleanValue
 
 	// To enable the instance for Amazon Web Services Nitro Enclaves, set this
-	// parameter to true; otherwise, set it to false.
+	// parameter to true ; otherwise, set it to false .
 	EnclaveOptions *types.EnclaveOptions
 
 	// The security groups associated with the instance.
@@ -99,13 +99,13 @@ type DescribeInstanceAttributeOutput struct {
 	// The RAM disk ID.
 	RamdiskId *types.AttributeValue
 
-	// The device name of the root device volume (for example, /dev/sda1).
+	// The device name of the root device volume (for example, /dev/sda1 ).
 	RootDeviceName *types.AttributeValue
 
 	// Enable or disable source/destination checks, which ensure that the instance is
 	// either the source or the destination of any traffic that it receives. If the
-	// value is true, source/destination checks are enabled; otherwise, they are
-	// disabled. The default value is true. You must disable source/destination checks
+	// value is true , source/destination checks are enabled; otherwise, they are
+	// disabled. The default value is true . You must disable source/destination checks
 	// if the instance runs services such as network address translation, routing, or
 	// firewalls.
 	SourceDestCheck *types.AttributeBooleanValue
@@ -124,6 +124,9 @@ type DescribeInstanceAttributeOutput struct {
 }
 
 func (c *Client) addOperationDescribeInstanceAttributeMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeInstanceAttribute{}, middleware.After)
 	if err != nil {
 		return err
@@ -132,34 +135,38 @@ func (c *Client) addOperationDescribeInstanceAttributeMiddlewares(stack *middlew
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeInstanceAttribute"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -168,10 +175,16 @@ func (c *Client) addOperationDescribeInstanceAttributeMiddlewares(stack *middlew
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = addOpDescribeInstanceAttributeValidationMiddleware(stack); err != nil {
 		return err
 	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeInstanceAttribute(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -183,6 +196,9 @@ func (c *Client) addOperationDescribeInstanceAttributeMiddlewares(stack *middlew
 	if err = addRequestResponseLogging(stack, options); err != nil {
 		return err
 	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -190,7 +206,6 @@ func newServiceMetadataMiddleware_opDescribeInstanceAttribute(region string) *aw
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeInstanceAttribute",
 	}
 }

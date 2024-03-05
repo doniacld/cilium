@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go/middleware"
 	smithytime "github.com/aws/smithy-go/time"
@@ -17,10 +16,10 @@ import (
 )
 
 // Describes the specified conversion tasks or all your conversion tasks. For more
-// information, see the VM Import/Export User Guide
-// (https://docs.aws.amazon.com/vm-import/latest/userguide/). For information about
-// the import manifest referenced by this API action, see VM Import Manifest
-// (https://docs.aws.amazon.com/AWSEC2/latest/APIReference/manifest.html).
+// information, see the VM Import/Export User Guide (https://docs.aws.amazon.com/vm-import/latest/userguide/)
+// . For information about the import manifest referenced by this API action, see
+// VM Import Manifest (https://docs.aws.amazon.com/AWSEC2/latest/APIReference/manifest.html)
+// .
 func (c *Client) DescribeConversionTasks(ctx context.Context, params *DescribeConversionTasksInput, optFns ...func(*Options)) (*DescribeConversionTasksOutput, error) {
 	if params == nil {
 		params = &DescribeConversionTasksInput{}
@@ -43,8 +42,8 @@ type DescribeConversionTasksInput struct {
 
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
-	// required permissions, the error response is DryRunOperation. Otherwise, it is
-	// UnauthorizedOperation.
+	// required permissions, the error response is DryRunOperation . Otherwise, it is
+	// UnauthorizedOperation .
 	DryRun *bool
 
 	noSmithyDocumentSerde
@@ -62,6 +61,9 @@ type DescribeConversionTasksOutput struct {
 }
 
 func (c *Client) addOperationDescribeConversionTasksMiddlewares(stack *middleware.Stack, options Options) (err error) {
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
 	err = stack.Serialize.Add(&awsEc2query_serializeOpDescribeConversionTasks{}, middleware.After)
 	if err != nil {
 		return err
@@ -70,34 +72,38 @@ func (c *Client) addOperationDescribeConversionTasksMiddlewares(stack *middlewar
 	if err != nil {
 		return err
 	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeConversionTasks"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
+		return err
+	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddClientRequestIDMiddleware(stack); err != nil {
+	if err = addClientRequestID(stack); err != nil {
 		return err
 	}
-	if err = smithyhttp.AddComputeContentLengthMiddleware(stack); err != nil {
+	if err = addComputeContentLength(stack); err != nil {
 		return err
 	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = v4.AddComputePayloadSHA256Middleware(stack); err != nil {
+	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetryMiddlewares(stack, options); err != nil {
+	if err = addRetry(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
+	if err = addRawResponseToMetadata(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
+	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -106,7 +112,13 @@ func (c *Client) addOperationDescribeConversionTasksMiddlewares(stack *middlewar
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeConversionTasks(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -116,6 +128,9 @@ func (c *Client) addOperationDescribeConversionTasksMiddlewares(stack *middlewar
 		return err
 	}
 	if err = addRequestResponseLogging(stack, options); err != nil {
+		return err
+	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
 	return nil
@@ -136,15 +151,24 @@ type ConversionTaskCancelledWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// ConversionTaskCancelledWaiter will use default minimum delay of 15 seconds. Note
 	// that MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, ConversionTaskCancelledWaiter will use default max delay of 120
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, ConversionTaskCancelledWaiter will use default max delay of 120
 	// seconds. Note that MaxDelay must resolve to value greater than or equal to the
 	// MinDelay.
 	MaxDelay time.Duration
@@ -237,6 +261,9 @@ func (w *ConversionTaskCancelledWaiter) WaitForOutput(ctx context.Context, param
 
 		out, err := w.client.DescribeConversionTasks(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -313,15 +340,24 @@ type ConversionTaskCompletedWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// ConversionTaskCompletedWaiter will use default minimum delay of 15 seconds. Note
 	// that MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, ConversionTaskCompletedWaiter will use default max delay of 120
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, ConversionTaskCompletedWaiter will use default max delay of 120
 	// seconds. Note that MaxDelay must resolve to value greater than or equal to the
 	// MinDelay.
 	MaxDelay time.Duration
@@ -414,6 +450,9 @@ func (w *ConversionTaskCompletedWaiter) WaitForOutput(ctx context.Context, param
 
 		out, err := w.client.DescribeConversionTasks(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -538,16 +577,26 @@ type ConversionTaskDeletedWaiterOptions struct {
 	// Set of options to modify how an operation is invoked. These apply to all
 	// operations invoked for this client. Use functional options on operation call to
 	// modify this list for per operation behavior.
+	//
+	// Passing options here is functionally equivalent to passing values to this
+	// config's ClientOptions field that extend the inner client's APIOptions directly.
 	APIOptions []func(*middleware.Stack) error
+
+	// Functional options to be passed to all operations invoked by this client.
+	//
+	// Function values that modify the inner APIOptions are applied after the waiter
+	// config's own APIOptions modifiers.
+	ClientOptions []func(*Options)
 
 	// MinDelay is the minimum amount of time to delay between retries. If unset,
 	// ConversionTaskDeletedWaiter will use default minimum delay of 15 seconds. Note
 	// that MinDelay must resolve to a value lesser than or equal to the MaxDelay.
 	MinDelay time.Duration
 
-	// MaxDelay is the maximum amount of time to delay between retries. If unset or set
-	// to zero, ConversionTaskDeletedWaiter will use default max delay of 120 seconds.
-	// Note that MaxDelay must resolve to value greater than or equal to the MinDelay.
+	// MaxDelay is the maximum amount of time to delay between retries. If unset or
+	// set to zero, ConversionTaskDeletedWaiter will use default max delay of 120
+	// seconds. Note that MaxDelay must resolve to value greater than or equal to the
+	// MinDelay.
 	MaxDelay time.Duration
 
 	// LogWaitAttempts is used to enable logging for waiter retry attempts
@@ -638,6 +687,9 @@ func (w *ConversionTaskDeletedWaiter) WaitForOutput(ctx context.Context, params 
 
 		out, err := w.client.DescribeConversionTasks(ctx, params, func(o *Options) {
 			o.APIOptions = append(o.APIOptions, apiOptions...)
+			for _, opt := range options.ClientOptions {
+				opt(o)
+			}
 		})
 
 		retryable, err := options.Retryable(ctx, params, out, err)
@@ -711,7 +763,6 @@ func newServiceMetadataMiddleware_opDescribeConversionTasks(region string) *awsm
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "ec2",
 		OperationName: "DescribeConversionTasks",
 	}
 }
