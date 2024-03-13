@@ -77,7 +77,7 @@ jobs:
 
           - name: '1'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'rhel8-20240221.111541'
+            kernel: 'rhel8-20240305.092417'
             kube-proxy: 'iptables'
             kpr: 'false'
             tunnel: 'vxlan'
@@ -88,7 +88,7 @@ jobs:
 
           - name: '2'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '5.4-20240215.093821'
+            kernel: '5.4-20240305.092417'
             kube-proxy: 'iptables'
             kpr: 'false'
             tunnel: 'disabled'
@@ -99,7 +99,7 @@ jobs:
 
           - name: '3'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '5.10-20240215.093821'
+            kernel: '5.10-20240305.092417'
             kube-proxy: 'iptables'
             kpr: 'false'
             tunnel: 'disabled'
@@ -111,7 +111,7 @@ jobs:
 
           - name: '4'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-next-20240226.012633'
+            kernel: 'bpf-next-20240309.012251'
             kube-proxy: 'iptables'
             kpr: 'false'
             tunnel: 'geneve'
@@ -121,7 +121,7 @@ jobs:
             key-one: 'cbc(aes)'
             key-two: 'gcm(aes)'
 
-    timeout-minutes: 70
+    timeout-minutes: 75
     steps:
       - name: Checkout context ref (trusted)
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -163,7 +163,7 @@ jobs:
           misc: ${{ matrix.misc }}
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@7306e3cdc6caee738157f08e3e1ba26179f104e5 # v0.15.23
+        uses: cilium/cilium-cli@ca0d5a23b842d78ce3b5c79a80d546867493daf7 # v0.16.0
         with:
           repository: ${{ env.CILIUM_CLI_RELEASE_REPO }}
           release-version: ${{ env.CILIUM_CLI_VERSION }}
@@ -223,7 +223,6 @@ jobs:
           kubectl create -n kube-system secret generic cilium-ipsec-keys \
             --from-literal=keys="3 ${key}"
 
-          export CILIUM_CLI_MODE=helm
           ./cilium-cli install ${{ steps.cilium-config.outputs.config }}
           kubectl -n cilium-spire wait --for=condition=Ready pod -l app=spire-server --timeout=300s
           kubectl -n cilium-spire wait --for=condition=Ready pod -l app=spire-agent --timeout=300s
@@ -242,44 +241,9 @@ jobs:
             --flush-ct
 
       - name: Rotate IPsec Key & Test (${{ join(matrix.*, ', ') }})
-        uses: ./.github/actions/conn-disrupt-test
+        uses: ./.github/actions/ipsec-key-rotate
         with:
-          job-name: conformance-ipsec-e2e-key-rotation-${{ matrix.name }}
-          operation-cmd: |
-            KEYID=$(kubectl get secret -n kube-system cilium-ipsec-keys -o go-template --template={{.data.keys}} | base64 -d | cut -c 1)
-            if [[ $KEYID -ge 15 ]]; then KEYID=0; fi
-
-            if [[ "${{ matrix.key-two }}" == "gcm(aes)" ]]; then
-              key="rfc4106(gcm(aes)) $(dd if=/dev/urandom count=20 bs=1 2> /dev/null | xxd -p -c 64) 128"
-            elif [[ "${{ matrix.key-two }}" == "cbc(aes)" ]]; then
-              key="hmac(sha256) $(dd if=/dev/urandom count=32 bs=1 2> /dev/null| xxd -p -c 64) cbc(aes) $(dd if=/dev/urandom count=32 bs=1 2> /dev/null| xxd -p -c 64)"
-            else
-              echo "Invalid key type"; exit 1
-            fi
-            data="{\"stringData\":{\"keys\":\"$((($KEYID+1))) ${key}\"}}"
-            kubectl patch secret -n kube-system cilium-ipsec-keys -p="$data" -v=1
-
-            # Wait until key rotation starts
-            while true; do
-              keys_in_use=$(kubectl -n kube-system exec daemonset/cilium -c cilium-agent -- cilium-dbg encrypt status | awk '/Keys in use/ {print $NF}')
-              if [[ $keys_in_use == 2 ]]; then
-                break
-              fi
-              echo "Waiting until key rotation starts (seeing $keys_in_use keys)"
-              sleep 30s
-            done
-
-            # Wait until key rotation completes
-            # By default the key rotation cleanup delay is 5min, let's sleep 4min before actively polling
-            sleep $((4*60))
-            while true; do
-              keys_in_use=$(kubectl -n kube-system exec daemonset/cilium -c cilium-agent -- cilium-dbg encrypt status | awk '/Keys in use/ {print $NF}')
-              if [[ $keys_in_use == 1 ]]; then
-                break
-              fi
-              echo "Waiting until key rotation completes (seeing $keys_in_use keys)"
-              sleep 30s
-            done
+          key-type: ${{ matrix.key-two }}
 
       - name: Fetch artifacts
         if: ${{ !success() }}
