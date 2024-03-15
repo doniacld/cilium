@@ -364,9 +364,6 @@ const (
 	// EnableMasqueradeRouteSource masquerades to the source route IP address instead of the interface one
 	EnableMasqueradeRouteSource = "enable-masquerade-to-route-source"
 
-	// DeriveMasqIPAddrFromDevice is device name which IP addr is used for BPF masquerades
-	DeriveMasqIPAddrFromDevice = "derive-masquerade-ip-addr-from-device"
-
 	// EnableIPMasqAgent enables BPF ip-masq-agent
 	EnableIPMasqAgent = "enable-ip-masq-agent"
 
@@ -784,9 +781,6 @@ const (
 
 	// KVstoreConnectivityTimeout is the timeout when performing kvstore operations
 	KVstoreConnectivityTimeout = "kvstore-connectivity-timeout"
-
-	// IPAllocationTimeout is the timeout when allocating CIDRs
-	IPAllocationTimeout = "ip-allocation-timeout"
 
 	// IdentityChangeGracePeriod is the name of the
 	// IdentityChangeGracePeriod option
@@ -1774,7 +1768,6 @@ type DaemonConfig struct {
 	EnableBPFMasquerade         bool
 	EnableMasqueradeRouteSource bool
 	EnableIPMasqAgent           bool
-	DeriveMasqIPAddrFromDevice  string
 	IPMasqAgentConfigPath       string
 
 	EnableBPFClockProbe     bool
@@ -1910,9 +1903,6 @@ type DaemonConfig struct {
 
 	// KVstoreConnectivityTimeout is the timeout when performing kvstore operations
 	KVstoreConnectivityTimeout time.Duration
-
-	// IPAllocationTimeout is the timeout when allocating CIDRs
-	IPAllocationTimeout time.Duration
 
 	// IdentityChangeGracePeriod is the grace period that needs to pass
 	// before an endpoint that has changed its identity will start using
@@ -2478,7 +2468,6 @@ var (
 		ToFQDNsMaxIPsPerHost:            defaults.ToFQDNsMaxIPsPerHost,
 		KVstorePeriodicSync:             defaults.KVstorePeriodicSync,
 		KVstoreConnectivityTimeout:      defaults.KVstoreConnectivityTimeout,
-		IPAllocationTimeout:             defaults.IPAllocationTimeout,
 		IdentityChangeGracePeriod:       defaults.IdentityChangeGracePeriod,
 		IdentityRestoreGracePeriod:      defaults.IdentityRestoreGracePeriod,
 		FixedIdentityMapping:            make(map[string]string),
@@ -3111,7 +3100,6 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.KVstorePeriodicSync = vp.GetDuration(KVstorePeriodicSync)
 	c.KVstoreConnectivityTimeout = vp.GetDuration(KVstoreConnectivityTimeout)
 	c.KVstoreMaxConsecutiveQuorumErrors = vp.GetInt(KVstoreMaxConsecutiveQuorumErrorsName)
-	c.IPAllocationTimeout = vp.GetDuration(IPAllocationTimeout)
 	c.LabelPrefixFile = vp.GetString(LabelPrefixFile)
 	c.Labels = vp.GetStringSlice(Labels)
 	c.LibDir = vp.GetString(LibDir)
@@ -3181,7 +3169,6 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.EnableIPv6Masquerade = vp.GetBool(EnableIPv6Masquerade) && c.EnableIPv6
 	c.EnableBPFMasquerade = vp.GetBool(EnableBPFMasquerade)
 	c.EnableMasqueradeRouteSource = vp.GetBool(EnableMasqueradeRouteSource)
-	c.DeriveMasqIPAddrFromDevice = vp.GetString(DeriveMasqIPAddrFromDevice)
 	c.EnablePMTUDiscovery = vp.GetBool(EnablePMTUDiscovery)
 	c.IPv6NAT46x64CIDR = defaults.IPv6NAT46x64CIDR
 	c.IPAMCiliumNodeUpdateRate = vp.GetDuration(IPAMCiliumNodeUpdateRate)
