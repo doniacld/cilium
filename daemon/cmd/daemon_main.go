@@ -1354,6 +1354,7 @@ func initEnv(vp *viper.Viper) {
 	if option.Config.EnableIPSec &&
 		!option.Config.TunnelingEnabled() &&
 		len(option.Config.EncryptInterface) == 0 &&
+		len(option.Config.GetDevices()) == 0 &&
 		option.Config.IPAM != ipamOption.IPAMENI {
 		link, err := linuxdatapath.NodeDeviceNameWithDefaultRoute()
 		if err != nil {
@@ -1382,13 +1383,6 @@ func initEnv(vp *viper.Viper) {
 			log.Fatalf("The host firewall requires remote-node identities (%s) when running with %s",
 				option.EnableRemoteNodeIdentity, option.EnableEndpointRoutes)
 		}
-	}
-
-	if option.Config.EnableIPv6Masquerade && option.Config.EnableBPFMasquerade && option.Config.EnableHostFirewall {
-		// We should be able to support this, but we first need to
-		// check how this plays in the datapath if BPF-masquerading is
-		// enabled for IPv4 only or IPv6 only.
-		log.Fatal("IPv6 BPF masquerade is not supported along with the host firewall.")
 	}
 
 	if option.Config.EnableHighScaleIPcache {

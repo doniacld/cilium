@@ -589,6 +589,12 @@
             "integer"
           ]
         },
+        "nodeMapMax": {
+          "type": [
+            "null",
+            "integer"
+          ]
+        },
         "policyMapMax": {
           "type": [
             "null",
@@ -4411,6 +4417,17 @@
         },
         "priorityClassName": {
           "type": "string"
+        },
+        "readinessProbe": {
+          "properties": {
+            "initialDelaySeconds": {
+              "type": "integer"
+            },
+            "periodSeconds": {
+              "type": "integer"
+            }
+          },
+          "type": "object"
         },
         "resources": {
           "type": "object"

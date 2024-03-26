@@ -137,6 +137,7 @@ Yunsong
 Zannoni
 Zhou
 aarch
+addr
 alibabacloud
 allocatable
 allocateLoadBalancerNodePorts
@@ -381,6 +382,7 @@ impactful
 ingressing
 init
 initContainer
+initialDelaySeconds
 inlined
 inlines
 inlining
@@ -509,6 +511,7 @@ mountPath
 mov
 mtk
 mul
+multicast
 multicore
 multihoming
 musl
