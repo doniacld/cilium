@@ -1992,7 +1992,6 @@ func (kub *Kubectl) ValidateServicePlumbing(namespace, service string) error {
 
 	g, _ := errgroup.WithContext(context.TODO())
 	for _, ciliumPod := range ciliumPods {
-		ciliumPod := ciliumPod
 		g.Go(func() error {
 			var err error
 			// The plumbing of Kubernetes services typically lags
@@ -3393,7 +3392,7 @@ func (kub *Kubectl) CiliumCheckReport(ctx context.Context) {
 			total++
 			status := strings.SplitN(data, "::", 2)
 			if len(status) != 2 {
-				// Just make sure that the the len of the output is 2 to not
+				// Just make sure that the len of the output is 2 to not
 				// fail on index error in the following lines.
 				continue
 			}

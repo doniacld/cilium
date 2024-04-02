@@ -64,6 +64,7 @@ type linuxNodeHandler struct {
 	neighDiscoveryLinks  []netlink.Link
 	neighNextHopByNode4  map[nodeTypes.Identity]map[string]string // val = (key=link, value=string(net.IP))
 	neighNextHopByNode6  map[nodeTypes.Identity]map[string]string // val = (key=link, value=string(net.IP))
+	ipsecUpdateNeeded    map[nodeTypes.Identity]bool
 	// All three mappings below hold both IPv4 and IPv6 entries.
 	neighNextHopRefCount   counter.StringCounter
 	neighByNextHop         map[string]*netlink.Neigh // key = string(net.IP)
@@ -117,6 +118,7 @@ func NewNodeHandler(
 		ipsecMetricCollector:   ipsec.NewXFRMCollector(),
 		prefixClusterMutatorFn: func(node *nodeTypes.Node) []cmtypes.PrefixClusterOpts { return nil },
 		nodeNeighborQueue:      nbq,
+		ipsecUpdateNeeded:      map[nodeTypes.Identity]bool{},
 	}
 }
 
@@ -958,7 +960,7 @@ func (n *linuxNodeHandler) nodeUpdate(oldNode, newNode *nodeTypes.Node, firstAdd
 	}
 
 	if n.nodeConfig.EnableIPSec {
-		errs = errors.Join(errs, n.enableIPsec(newNode, remoteNodeID))
+		errs = errors.Join(errs, n.enableIPsec(oldNode, newNode, remoteNodeID))
 		newKey = newNode.EncryptionKey
 	}
 
@@ -1241,8 +1243,7 @@ func (n *linuxNodeHandler) NodeConfigurationChanged(newConfig datapath.LocalNode
 				ipv4CIDRs := info.GetIPv4CIDRs()
 				ipv4PodSubnets := make([]*net.IPNet, 0, len(ipv4CIDRs))
 				for _, c := range ipv4CIDRs {
-					cidr := c // create a copy to be able to take a reference
-					ipv4PodSubnets = append(ipv4PodSubnets, &cidr)
+					ipv4PodSubnets = append(ipv4PodSubnets, &c)
 				}
 				n.nodeConfig.IPv4PodSubnets = ipv4PodSubnets
 			}

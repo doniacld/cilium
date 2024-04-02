@@ -867,6 +867,8 @@ encryption:
     # -- Maximum duration of the IPsec key rotation. The previous key will be
     # removed after that delay.
     keyRotationDuration: "5m"
+    # -- Enable IPSec encrypted overlay
+    encryptedOverlay: false
   wireguard:
     # -- Enables the fallback to the user-space implementation.
     userspaceFallback: false
@@ -1762,7 +1764,7 @@ readinessProbe:
   # -- interval between checks of the readiness probe
   periodSeconds: 30
 # -- Configure the kube-proxy replacement in Cilium BPF datapath
-# Valid options are "true", "false", "disabled" (deprecated), "partial" (deprecated), "strict" (deprecated).
+# Valid options are "true" or "false".
 # ref: https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/
 #kubeProxyReplacement: "false"
 
@@ -2214,9 +2216,6 @@ envoy:
       metricRelabelings: ~
     # -- Serve prometheus metrics for cilium-envoy on the configured port
     port: "9964"
-# -- Enable use of the remote node identity.
-# ref: https://docs.cilium.io/en/v1.7/install/upgrade/#configmap-remote-node-identity
-remoteNodeIdentity: true
 
 # -- Enable/Disable use of node label based identity
 nodeSelectorLabels: false
@@ -2631,6 +2630,8 @@ nodeinit:
     override: ~
     repository: "${CILIUM_NODEINIT_REPO}"
     tag: "${CILIUM_NODEINIT_VERSION}"
+    digest: "${CILIUM_NODEINIT_DIGEST}"
+    useDigest: true
     pullPolicy: "${PULL_POLICY}"
   # -- The priority class to use for the nodeinit pod.
   priorityClassName: ""

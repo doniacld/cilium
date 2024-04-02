@@ -30,6 +30,7 @@ DTrace
 Dangaard
 Datadog
 Dataplane
+Deconfigure
 Dinan
 Dockerfile
 Dockerfiles
@@ -151,6 +152,7 @@ api
 apiKey
 apiKeys
 apiserver
+ariane
 arithmetics
 artii
 asm
@@ -736,6 +738,7 @@ unix
 unlabel
 unmanaged
 unmigrated
+unselect
 unsettable
 untriaged
 untrusted
