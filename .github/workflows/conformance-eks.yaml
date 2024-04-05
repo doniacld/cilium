@@ -61,6 +61,15 @@ env:
   kubectl_version: v1.29.3
 
 jobs:
+  echo-inputs:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    name: Echo Workflow Dispatch Inputs
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Echo Workflow Dispatch Inputs
+        run: |
+          echo '${{ tojson(inputs) }}'
+
   commit-status-start:
     name: Commit Status Start
     runs-on: ubuntu-latest
@@ -165,7 +174,7 @@ jobs:
           echo owner=${OWNER} >> $GITHUB_OUTPUT
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@de740a64da1b12dc8488cf3af2474c60d52c349e # v0.16.3
+        uses: cilium/cilium-cli@a9579d1afc528b085930c5237a69ee77b2c2be76 # v0.16.4
         with:
           repository: ${{ env.CILIUM_CLI_RELEASE_REPO }}
           release-version: ${{ env.CILIUM_CLI_VERSION }}
@@ -258,7 +267,7 @@ jobs:
             install/kubernetes/cilium
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@de740a64da1b12dc8488cf3af2474c60d52c349e # v0.16.3
+        uses: cilium/cilium-cli@a9579d1afc528b085930c5237a69ee77b2c2be76 # v0.16.4
         with:
           repository: ${{ env.CILIUM_CLI_RELEASE_REPO }}
           release-version: ${{ env.CILIUM_CLI_VERSION }}

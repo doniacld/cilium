@@ -1211,6 +1211,9 @@
           },
           "type": "object"
         },
+        "enableEndpointSliceSynchronization": {
+          "type": "boolean"
+        },
         "maxConnectedClusters": {
           "type": "integer"
         },
@@ -3386,6 +3389,9 @@
         "ingressLBAnnotationPrefixes": {
           "items": {
             "anyOf": [
+              {
+                "type": "string"
+              },
               {
                 "type": "string"
               },

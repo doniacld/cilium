@@ -97,7 +97,7 @@ static __always_inline int __per_packet_lb_svc_xlate_4(void *ctx, struct iphdr *
 
 	lb4_fill_key(&key, &tuple);
 
-	svc = lb4_lookup_service(&key, is_defined(ENABLE_NODEPORT), false);
+	svc = lb4_lookup_service(&key, is_defined(ENABLE_NODEPORT));
 	if (svc) {
 #if defined(ENABLE_L7_LB)
 		if (lb4_svc_is_l7loadbalancer(svc)) {
@@ -154,7 +154,7 @@ static __always_inline int __per_packet_lb_svc_xlate_6(void *ctx, struct ipv6hdr
 	 * the CT entry for destination endpoints where we can't encode the
 	 * state in the address.
 	 */
-	svc = lb6_lookup_service(&key, is_defined(ENABLE_NODEPORT), false);
+	svc = lb6_lookup_service(&key, is_defined(ENABLE_NODEPORT));
 	if (svc) {
 #if defined(ENABLE_L7_LB)
 		if (lb6_svc_is_l7loadbalancer(svc)) {
@@ -1615,7 +1615,6 @@ skip_policy_enforcement:
 		ct_state_new.src_sec_id = src_label;
 		ct_state_new.from_tunnel = from_tunnel;
 		ct_state_new.proxy_redirect = *proxy_port > 0;
-		ct_state_new.from_l7lb = false;
 
 		/* ext_err may contain a value from __policy_can_access, and
 		 * ct_create6 overwrites it only if it returns an error itself.
@@ -1974,7 +1973,6 @@ skip_policy_enforcement:
 		ct_state_new.src_sec_id = src_label;
 		ct_state_new.from_tunnel = from_tunnel;
 		ct_state_new.proxy_redirect = *proxy_port > 0;
-		ct_state_new.from_l7lb = false;
 
 		/* ext_err may contain a value from __policy_can_access, and
 		 * ct_create4 overwrites it only if it returns an error itself.

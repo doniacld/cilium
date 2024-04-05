@@ -4,7 +4,6 @@
 package endpoint
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -521,7 +520,7 @@ func (e *Endpoint) waitForProxyCompletions(proxyWaitGroup *completion.WaitGroup)
 	e.getLogger().Debug("Waiting for proxy updates to complete...")
 	err = proxyWaitGroup.Wait()
 	if err != nil {
-		return fmt.Errorf("proxy state changes failed: %s", err)
+		return fmt.Errorf("proxy state changes failed: %w", err)
 	}
 	e.getLogger().Debug("Wait time for proxy updates: ", time.Since(start))
 
@@ -878,31 +877,11 @@ func (e *Endpoint) ConntrackLocalLocked() bool {
 
 // base64 returns the endpoint in a base64 format.
 func (e *Endpoint) base64() (string, error) {
-	var (
-		jsonBytes []byte
-		err       error
-	)
-
-	jsonBytes, err = json.Marshal(e)
+	jsonBytes, err := e.MarshalJSON()
 	if err != nil {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(jsonBytes), nil
-}
-
-// parseBase64ToEndpoint parses the endpoint stored in the given base64 byte slice.
-func parseBase64ToEndpoint(b []byte, ep *Endpoint) error {
-	jsonBytes := make([]byte, base64.StdEncoding.DecodedLen(len(b)))
-	n, err := base64.StdEncoding.Decode(jsonBytes, b)
-	if err != nil {
-		return err
-	}
-
-	if err := json.Unmarshal(jsonBytes[:n], ep); err != nil {
-		return fmt.Errorf("error unmarshaling serializableEndpoint from base64 representation: %s", err)
-	}
-
-	return nil
 }
 
 // FilterEPDir returns a list of directories' names that possible belong to an endpoint.
@@ -919,25 +898,19 @@ func FilterEPDir(dirFiles []os.DirEntry) []string {
 	return eptsID
 }
 
-// parseEndpoint parses the given bEp which is in the form of:
-// common.CiliumCHeaderPrefix + common.Version + ":" + endpointBase64
+// parseEndpoint parses the JSON representation of an endpoint.
+//
 // Note that the parse'd endpoint's identity is only partially restored. The
 // caller must call `SetIdentity()` to make the returned endpoint's identity useful.
-func parseEndpoint(ctx context.Context, owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, bEp []byte) (*Endpoint, error) {
-	// TODO: Provide a better mechanism to update from old version once we bump
-	// TODO: cilium version.
-	epSlice := bytes.Split(bEp, []byte{':'})
-	if len(epSlice) != 2 {
-		return nil, fmt.Errorf("invalid format %q. Should contain a single ':'", bEp)
-	}
+func parseEndpoint(ctx context.Context, owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, epJSON []byte) (*Endpoint, error) {
 	ep := Endpoint{
 		owner:            owner,
 		namedPortsGetter: namedPortsGetter,
 		policyGetter:     policyGetter,
 	}
 
-	if err := parseBase64ToEndpoint(epSlice[1], &ep); err != nil {
-		return nil, fmt.Errorf("failed to parse restored endpoint: %s", err)
+	if err := ep.UnmarshalJSON(epJSON); err != nil {
+		return nil, fmt.Errorf("failed to parse restored endpoint: %w", err)
 	}
 
 	ep.initDNSHistoryTrigger()
@@ -1231,7 +1204,7 @@ type DeleteConfig struct {
 // which depends on kvstore connectivity must be protected by a flag in
 // DeleteConfig and the restore logic must opt-out of it.
 func (e *Endpoint) leaveLocked(proxyWaitGroup *completion.WaitGroup, conf DeleteConfig) []error {
-	errors := []error{}
+	errs := []error{}
 
 	if !e.isProperty(PropertyFakeEndpoint) {
 		e.owner.Datapath().Loader().Unload(e.createEpInfoCache(""))
@@ -1255,7 +1228,7 @@ func (e *Endpoint) leaveLocked(proxyWaitGroup *completion.WaitGroup, conf Delete
 
 	if e.policyMap != nil {
 		if err := e.policyMap.Close(); err != nil {
-			errors = append(errors, fmt.Errorf("unable to close policymap %s: %s", e.policyMap.String(), err))
+			errs = append(errs, fmt.Errorf("unable to close policymap %s: %w", e.policyMap.String(), err))
 		}
 	}
 
@@ -1272,7 +1245,7 @@ func (e *Endpoint) leaveLocked(proxyWaitGroup *completion.WaitGroup, conf Delete
 
 		_, err := e.allocator.Release(releaseCtx, e.SecurityIdentity, false)
 		if err != nil {
-			errors = append(errors, fmt.Errorf("unable to release identity: %s", err))
+			errs = append(errs, fmt.Errorf("unable to release identity: %w", err))
 		}
 		e.removeNetworkPolicy()
 		e.SecurityIdentity = nil
@@ -1297,7 +1270,7 @@ func (e *Endpoint) leaveLocked(proxyWaitGroup *completion.WaitGroup, conf Delete
 	endpointPolicyStatus.Remove(e.ID)
 	e.getLogger().Info("Removed endpoint")
 
-	return errors
+	return errs
 }
 
 // GetK8sNamespace returns the name of the pod if the endpoint represents a
@@ -2130,14 +2103,12 @@ func (e *Endpoint) runIdentityResolver(ctx context.Context, myChangeRev int, blo
 	if blocking || identity.IdentityAllocationIsLocal(newLabels) {
 		scopedLog.Info("Resolving identity labels (blocking)")
 		regenTriggered, err = e.identityLabelsChanged(ctx, myChangeRev)
-		switch err {
-		case ErrNotAlive:
-			scopedLog.Debug("not changing endpoint identity because endpoint is in process of being removed")
-			return false
-		default:
-			if err != nil {
-				scopedLog.WithError(err).Warn("Error changing endpoint identity")
+		if err != nil {
+			if errors.Is(err, ErrNotAlive) {
+				scopedLog.Debug("not changing endpoint identity because endpoint is in process of being removed")
+				return false
 			}
+			scopedLog.WithError(err).Warn("Error changing endpoint identity")
 		}
 	} else {
 		scopedLog.Info("Resolving identity labels (non-blocking)")
@@ -2149,13 +2120,11 @@ func (e *Endpoint) runIdentityResolver(ctx context.Context, myChangeRev int, blo
 			Group: resolveIdentityControllerGroup,
 			DoFunc: func(ctx context.Context) error {
 				_, err := e.identityLabelsChanged(ctx, myChangeRev)
-				switch err {
-				case ErrNotAlive:
+				if errors.Is(err, ErrNotAlive) {
 					e.getLogger().Debug("not changing endpoint identity because endpoint is in process of being removed")
 					return controller.NewExitReason("Endpoint disappeared")
-				default:
-					return err
 				}
+				return err
 			},
 			RunInterval: 5 * time.Minute,
 			Context:     e.aliveCtx,
@@ -2211,7 +2180,7 @@ func (e *Endpoint) identityLabelsChanged(ctx context.Context, myChangeRev int) (
 	notifySelectorCache := true
 	allocatedIdentity, _, err := e.allocator.AllocateIdentity(allocateCtx, newLabels, notifySelectorCache, identity.InvalidIdentity)
 	if err != nil {
-		err = fmt.Errorf("unable to resolve identity: %s", err)
+		err = fmt.Errorf("unable to resolve identity: %w", err)
 		e.LogStatus(Other, Warning, err.Error()+" (will retry)")
 		return false, err
 	}
@@ -2516,7 +2485,7 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
 		// expected, then the rules will be left as-is because there was
 		// likely manual intervention.
 		if err := linuxrouting.Delete(e.IPv4, option.Config.EgressMultiHomeIPRuleCompat); err != nil {
-			errs = append(errs, fmt.Errorf("unable to delete endpoint routing rules: %s", err))
+			errs = append(errs, fmt.Errorf("unable to delete endpoint routing rules: %w", err))
 		}
 	}
 
@@ -2528,12 +2497,12 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
 
 		if e.IPv4.IsValid() {
 			if err := e.owner.Datapath().RemoveNoTrackRules(e.IPv4.String(), e.noTrackPort, false); err != nil {
-				errs = append(errs, fmt.Errorf("unable to delete endpoint NOTRACK ipv4 rules: %s", err))
+				errs = append(errs, fmt.Errorf("unable to delete endpoint NOTRACK ipv4 rules: %w", err))
 			}
 		}
 		if e.IPv6.IsValid() {
 			if err := e.owner.Datapath().RemoveNoTrackRules(e.IPv6.String(), e.noTrackPort, true); err != nil {
-				errs = append(errs, fmt.Errorf("unable to delete endpoint NOTRACK ipv6 rules: %s", err))
+				errs = append(errs, fmt.Errorf("unable to delete endpoint NOTRACK ipv6 rules: %w", err))
 			}
 		}
 	}
@@ -2546,7 +2515,7 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
 
 	err := e.waitForProxyCompletions(proxyWaitGroup)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("unable to remove proxy redirects: %s", err))
+		errs = append(errs, fmt.Errorf("unable to remove proxy redirects: %w", err))
 	}
 	cancel()
 
