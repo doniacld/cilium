@@ -61,11 +61,16 @@ func (n EndpointSelector) CachedString() string {
 
 // UnmarshalJSON unmarshals the endpoint selector from the byte array.
 func (n *EndpointSelector) UnmarshalJSON(b []byte) error {
-	n.LabelSelector = &slim_metav1.LabelSelector{}
 	err := json.Unmarshal(b, n.LabelSelector)
 	if err != nil {
 		return err
 	}
+	// TODO remove me
+	//n.ParseCiliumExtendedKey()
+	return nil
+}
+
+func (n *EndpointSelector) ParseCiliumExtendedKey() {
 	if n.MatchLabels != nil {
 		ml := map[string]string{}
 		for k, v := range n.MatchLabels {
@@ -81,17 +86,23 @@ func (n *EndpointSelector) UnmarshalJSON(b []byte) error {
 		}
 		n.MatchExpressions = newMatchExpr
 	}
-	n.requirements = labelSelectorToRequirements(n.LabelSelector)
-	n.cachedLabelSelectorString = n.LabelSelector.String()
-	return nil
+	//n.requirements = labelSelectorToRequirements(n.LabelSelector)
+	// TODO DONIA: Check if it makes sense
+	// n.cachedLabelSelectorString = n.LabelSelector.String()
 }
 
 // MarshalJSON returns a JSON representation of the byte array.
-func (n EndpointSelector) MarshalJSON() ([]byte, error) {
+func (n *EndpointSelector) MarshalJSON() ([]byte, error) {
+	// TODO remove me
+	//n.ParseCiliumKey()
+	return json.Marshal(n.LabelSelector)
+}
+
+func (n *EndpointSelector) ParseCiliumKey() {
 	ls := slim_metav1.LabelSelector{}
 
 	if n.LabelSelector == nil {
-		return json.Marshal(ls)
+		return
 	}
 
 	if n.MatchLabels != nil {
@@ -109,7 +120,6 @@ func (n EndpointSelector) MarshalJSON() ([]byte, error) {
 		}
 		ls.MatchExpressions = newMatchExpr
 	}
-	return json.Marshal(ls)
 }
 
 // HasKeyPrefix checks if the endpoint selector contains the given key prefix in
@@ -297,7 +307,7 @@ func (n *EndpointSelector) AddMatchExpression(key string, op slim_metav1.LabelSe
 
 	// Update cache of the EndopintSelector from the embedded label selector.
 	// This is to make sure we have updates caches containing the required selectors.
-	n.requirements = labelSelectorToRequirements(n.LabelSelector)
+	n.requirements = labelSelectorToRequirements(n.LabelSelector) // TODO DONIA set to nil
 	n.cachedLabelSelectorString = n.LabelSelector.String()
 }
 
