@@ -85,7 +85,6 @@ func (n *EndpointSelector) ParseCiliumExtendedKey() {
 		}
 		n.MatchExpressions = newMatchExpr
 	}
-	n.cachedLabelSelectorString = n.LabelSelector.String()
 }
 
 // MarshalJSON returns a JSON representation of the byte array.
