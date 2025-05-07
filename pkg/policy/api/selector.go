@@ -61,12 +61,11 @@ func (n EndpointSelector) CachedString() string {
 
 // UnmarshalJSON unmarshals the endpoint selector from the byte array.
 func (n *EndpointSelector) UnmarshalJSON(b []byte) error {
+	n.LabelSelector = &slim_metav1.LabelSelector{}
 	err := json.Unmarshal(b, n.LabelSelector)
 	if err != nil {
 		return err
 	}
-	// TODO remove me
-	//n.ParseCiliumExtendedKey()
 	return nil
 }
 
@@ -86,23 +85,16 @@ func (n *EndpointSelector) ParseCiliumExtendedKey() {
 		}
 		n.MatchExpressions = newMatchExpr
 	}
-	//n.requirements = labelSelectorToRequirements(n.LabelSelector)
-	// TODO DONIA: Check if it makes sense
-	// n.cachedLabelSelectorString = n.LabelSelector.String()
+	n.requirements = labelSelectorToRequirements(n.LabelSelector)
+	n.cachedLabelSelectorString = n.LabelSelector.String()
 }
 
 // MarshalJSON returns a JSON representation of the byte array.
-func (n *EndpointSelector) MarshalJSON() ([]byte, error) {
-	// TODO remove me
-	//n.ParseCiliumKey()
-	return json.Marshal(n.LabelSelector)
-}
-
-func (n *EndpointSelector) ParseCiliumKey() {
+func (n EndpointSelector) MarshalJSON() ([]byte, error) {
 	ls := slim_metav1.LabelSelector{}
 
 	if n.LabelSelector == nil {
-		return
+		return json.Marshal(ls)
 	}
 
 	if n.MatchLabels != nil {
@@ -120,6 +112,7 @@ func (n *EndpointSelector) ParseCiliumKey() {
 		}
 		ls.MatchExpressions = newMatchExpr
 	}
+	return json.Marshal(ls)
 }
 
 // HasKeyPrefix checks if the endpoint selector contains the given key prefix in
