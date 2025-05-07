@@ -90,11 +90,15 @@ func (n *EndpointSelector) ParseCiliumExtendedKey() {
 }
 
 // MarshalJSON returns a JSON representation of the byte array.
-func (n EndpointSelector) MarshalJSON() ([]byte, error) {
+func (n *EndpointSelector) MarshalJSON() ([]byte, error) {
+	return json.Marshal(n.LabelSelector)
+}
+
+func (n *EndpointSelector) ParseCiliumKey() {
 	ls := slim_metav1.LabelSelector{}
 
 	if n.LabelSelector == nil {
-		return json.Marshal(ls)
+		return
 	}
 
 	if n.MatchLabels != nil {
@@ -112,7 +116,6 @@ func (n EndpointSelector) MarshalJSON() ([]byte, error) {
 		}
 		ls.MatchExpressions = newMatchExpr
 	}
-	return json.Marshal(ls)
 }
 
 // HasKeyPrefix checks if the endpoint selector contains the given key prefix in
