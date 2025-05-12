@@ -66,7 +66,6 @@ func (n *EndpointSelector) UnmarshalJSON(b []byte) error {
 	if err != nil {
 		return err
 	}
-	n.ParseExtendedKey()
 	return nil
 }
 
@@ -86,6 +85,7 @@ func (n *EndpointSelector) ParseExtendedKey() {
 		}
 		n.MatchExpressions = newMatchExpr
 	}
+
 	n.requirements = labelSelectorToRequirements(n.LabelSelector)
 	n.cachedLabelSelectorString = n.LabelSelector.String()
 }
@@ -186,6 +186,7 @@ func labelSelectorToRequirements(labelSelector *slim_metav1.LabelSelector) *k8sL
 	if !selectable {
 		return nil
 	}
+
 	return &requirements
 }
 
@@ -214,6 +215,32 @@ func NewESFromMatchRequirements(matchLabels map[string]string, reqs []slim_metav
 		LabelSelector:             labelSelector,
 		requirements:              labelSelectorToRequirements(labelSelector),
 		cachedLabelSelectorString: labelSelector.String(),
+	}
+}
+
+// NewESFromLabelsWithoutRequirements creates a new endpoint selector from the given labels.
+func NewESFromLabelsWithoutRequirements(lbls ...labels.Label) EndpointSelector {
+	ml := map[string]string{}
+	for _, lbl := range lbls {
+		ml[lbl.GetExtendedKey()] = lbl.Value
+	}
+
+	return NewESFromMatchRequirementsWithoutRequirements(ml, nil)
+}
+
+// NewESFromMatchRequirementsWithoutRequirements creates a new endpoint selector from the given
+// match specifications: An optional set of labels that must match, and
+// an optional slice of LabelSelectorRequirements.
+//
+// If the caller intends to reuse 'matchLabels' or 'reqs' after creating the
+// EndpointSelector, they must make a copy of the parameter.
+func NewESFromMatchRequirementsWithoutRequirements(matchLabels map[string]string, reqs []slim_metav1.LabelSelectorRequirement) EndpointSelector {
+	labelSelector := &slim_metav1.LabelSelector{
+		MatchLabels:      matchLabels,
+		MatchExpressions: reqs,
+	}
+	return EndpointSelector{
+		LabelSelector: labelSelector,
 	}
 }
 
