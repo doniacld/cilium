@@ -66,6 +66,11 @@ func (n *EndpointSelector) UnmarshalJSON(b []byte) error {
 	if err != nil {
 		return err
 	}
+	n.ParseExtendedKey()
+	return nil
+}
+
+func (n *EndpointSelector) ParseExtendedKey() {
 	if n.MatchLabels != nil {
 		ml := map[string]string{}
 		for k, v := range n.MatchLabels {
@@ -83,7 +88,6 @@ func (n *EndpointSelector) UnmarshalJSON(b []byte) error {
 	}
 	n.requirements = labelSelectorToRequirements(n.LabelSelector)
 	n.cachedLabelSelectorString = n.LabelSelector.String()
-	return nil
 }
 
 // MarshalJSON returns a JSON representation of the byte array.
