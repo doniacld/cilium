@@ -213,8 +213,8 @@ func NewESFromMatchRequirements(matchLabels map[string]string, reqs []slim_metav
 	}
 	return EndpointSelector{
 		LabelSelector:             labelSelector,
-		requirements:              labelSelectorToRequirements(labelSelector),
-		cachedLabelSelectorString: labelSelector.String(),
+		requirements:              nil,
+		cachedLabelSelectorString: "",
 	}
 }
 
