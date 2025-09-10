@@ -5,7 +5,6 @@ package devicemap
 
 import (
 	"fmt"
-	"log/slog"
 
 	"github.com/cilium/hive/cell"
 
@@ -21,23 +20,21 @@ var Cell = cell.Module(
 	cell.Provide(newDeviceMap),
 )
 
-func newDeviceMap(lifecycle cell.Lifecycle, logger *slog.Logger) (bpf.MapOut[Map], defines.NodeOut) {
-	deviceMap := newMap(logger)
+func newDeviceMap(lc cell.Lifecycle) (bpf.MapOut[*Map], defines.NodeOut) {
+	m := &Map{DeviceMap()}
 
-	lifecycle.Append(cell.Hook{
-		OnStart: func(context cell.HookContext) error {
-			return deviceMap.init()
+	lc.Append(cell.Hook{
+		OnStart: func(cell.HookContext) error {
+			return m.OpenOrCreate()
 		},
-		OnStop: func(context cell.HookContext) error {
-			return deviceMap.close()
-		},
+		OnStop: func(cell.HookContext) error { return m.Close() },
 	})
 
 	nodeOut := defines.NodeOut{
 		NodeDefines: defines.Map{
-			"DEVICE_MAP_SIZE": fmt.Sprint(MaxEntries),
+			"DEVICE_MAP_SIZE": fmt.Sprint(MapSize),
 		},
 	}
 
-	return bpf.NewMapOut(Map(deviceMap)), nodeOut
+	return bpf.NewMapOut(Map(m)), nodeOut
 }

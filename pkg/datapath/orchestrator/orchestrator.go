@@ -109,7 +109,7 @@ type orchestratorParams struct {
 	XDPConfig           xdp.Config
 	LBConfig            loadbalancer.Config
 	MaglevConfig        maglev.Config
-	DeviceMap           devicemap.Map
+	DeviceMap           *devicemap.Map
 }
 
 func newOrchestrator(params orchestratorParams) *orchestrator {
@@ -371,7 +371,10 @@ func (o *orchestrator) reinitializeDeviceMap(lnc *datapath.LocalNodeConfiguratio
 			isL3 = uint8(1)
 		}
 
-		err = o.params.DeviceMap.Update(uint32(dev.Index), uint64MAC, isL3)
+		err = o.params.DeviceMap.Update(&devicemap.DeviceKey{IfIndex: uint32(dev.Index)}, &devicemap.DeviceValue{
+			L3:  isL3,
+			MAC: uint64MAC,
+		})
 		if err != nil {
 			o.params.Log.Warn("Failed to update entry for device bpf map",
 				logfields.Error, err,
@@ -382,7 +385,7 @@ func (o *orchestrator) reinitializeDeviceMap(lnc *datapath.LocalNodeConfiguratio
 	}
 
 	// Remove non-existent devices in the device bpf map
-	o.params.DeviceMap.IterateWithCallback(
+	o.params.DeviceMap.DumpWithCallback(
 		func(key *devicemap.DeviceKey, val *devicemap.DeviceValue) {
 			if dev, found := deviceCache[key.IfIndex]; !found {
 				err := o.params.DeviceMap.Delete(key.IfIndex)

@@ -26,41 +26,43 @@ func setup(tb testing.TB) {
 
 func TestDeviceMap(t *testing.T) {
 	setup(t)
-	deviceMap := newMap(hivetest.Logger(t))
-	err := deviceMap.init()
-	require.NoError(t, err)
-	defer deviceMap.bpfMap.Unpin()
+	deviceMap, _ := newDeviceMap(hivetest.Lifecycle(t))
+	t.Cleanup(func() {
+		deviceMap.Map.Unpin()
+	})
 
 	randMAC01, _ := mac.GenerateRandMAC()
 	mac01, err := randMAC01.Uint64()
-	require.NoError(t, err)
+	value01 := &DeviceValue{MAC: mac01}
+
 	randMAC02, _ := mac.GenerateRandMAC()
 	mac02, err := randMAC02.Uint64()
 	require.NoError(t, err)
-	ifIndex := uint32(10)
+	value02 := &DeviceValue{MAC: mac02, L3: 1}
+	key := &DeviceKey{IfIndex: uint32(10)}
 
-	_, err = deviceMap.Lookup(ifIndex)
+	_, err = deviceMap.Map.Lookup(key)
 	require.ErrorIs(t, err, ebpf.ErrKeyNotExist)
 
-	err = deviceMap.Update(ifIndex, mac01, 0)
+	err = deviceMap.Map.Update(key, value01)
 	require.NoError(t, err)
 
-	info, err := deviceMap.Lookup(ifIndex)
+	info, err := deviceMap.Map.Lookup(key)
 	require.NoError(t, err)
-	require.Equal(t, mac01, info.MAC)
-	require.Equal(t, uint8(0), info.L3)
+	require.Equal(t, mac01, info.(*DeviceValue).MAC)
+	require.Equal(t, uint8(0), info.(*DeviceValue).L3)
 
-	err = deviceMap.Update(ifIndex, mac02, 1)
-	require.NoError(t, err)
-
-	info, err = deviceMap.Lookup(ifIndex)
-	require.NoError(t, err)
-	require.Equal(t, mac02, info.MAC)
-	require.Equal(t, uint8(1), info.L3)
-
-	err = deviceMap.Delete(ifIndex)
+	err = deviceMap.Map.Update(key, value02)
 	require.NoError(t, err)
 
-	_, err = deviceMap.Lookup(ifIndex)
+	info, err = deviceMap.Map.Lookup(key)
+	require.NoError(t, err)
+	require.Equal(t, mac02, info.(*DeviceValue).MAC)
+	require.Equal(t, uint8(1), info.(*DeviceValue).L3)
+
+	err = deviceMap.Map.Delete(key)
+	require.NoError(t, err)
+
+	_, err = deviceMap.Map.Lookup(key)
 	require.ErrorIs(t, err, ebpf.ErrKeyNotExist)
 }
